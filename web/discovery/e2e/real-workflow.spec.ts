@@ -18,7 +18,7 @@ test("real PostgreSQL: create case → source → explicit requirement → revie
   await expect(page.getByRole("heading",{name:"調査案件",exact:true})).toBeVisible();
 
   await page.getByRole("button",{name:"＋ 新規"}).click();
-  await page.getByLabel("Site UUID").fill(fixture.site);
+  await page.getByRole("combobox",{name:"対象拠点"}).selectOption(fixture.site);
   await page.getByLabel("案件名").fill(name);
   await page.getByRole("button",{name:"登録する"}).click();
   await expect(page.getByRole("heading",{name})).toBeVisible();
@@ -28,6 +28,15 @@ test("real PostgreSQL: create case → source → explicit requirement → revie
   await page.getByLabel("ページ番号").fill("3");
   await page.getByRole("button",{name:"資料情報を登録"}).click();
   await expect(page.getByText("合成テスト出典",{exact:true})).toBeVisible();
+  // Prove source data is loaded from PostgreSQL, not held only in React session state.
+  await page.getByRole("button",{name:"接続解除"}).click();
+  await page.getByLabel("Tenant UUID").fill(fixture.tenant);
+  await page.getByLabel("セッショントークン").fill(fixture.token);
+  await page.getByRole("button",{name:"接続する"}).click();
+  await page.getByRole("button",{name:new RegExp(name)}).click();
+  await page.getByRole("tab",{name:"根拠資料を登録"}).click();
+  await expect(page.getByText("合成テスト出典",{exact:true})).toBeVisible();
+
   const sourceLine=page.locator(".source-row").filter({hasText:"合成テスト出典"});
   const line=await sourceLine.locator("small").innerText();
   const sourceId=line.match(/[a-f0-9]{8}-[a-f0-9-]{27,}/i)?.[0];
@@ -36,7 +45,7 @@ test("real PostgreSQL: create case → source → explicit requirement → revie
   await page.getByRole("tab",{name:"要件管理"}).click();
   await page.getByLabel("課題・期待する成果").fill("現場の手入力を削減したい");
   await page.getByLabel("根拠レベル").selectOption("explicit");
-  await page.getByLabel("出典 UUID（明示の場合必須）").fill(sourceId!);
+  await page.getByRole("combobox",{name:"出典資料（明示の場合必須）"}).selectOption(sourceId!);
   await page.getByRole("button",{name:"要件を登録"}).click();
   await expect(page.getByRole("button",{name:/現場の手入力を削減したい/})).toBeVisible();
   await page.getByRole("button",{name:/現場の手入力を削減したい/}).click();

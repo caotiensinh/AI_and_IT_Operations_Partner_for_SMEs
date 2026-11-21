@@ -34,4 +34,28 @@ describe("input and authorization boundary",()=>{
     vi.stubGlobal("fetch",vi.fn(async()=>({ok:false,status:403})));
     await expect(new DiscoveryClient(config).cases()).rejects.toThrow("権限");
   });
+  it("requests server-scoped sites without sending client-chosen role claims",async()=>{
+    const fake=vi.fn(async()=>({ok:true,json:async()=>({
+      sites:[{id:config.tenantId,label:"Synthetic office"}],next_cursor:null,limit:50
+    })}));
+    vi.stubGlobal("fetch",fake);
+    const page=await new DiscoveryClient(config).sites();
+    expect(page.sites).toHaveLength(1);
+    const [url,options]=fake.mock.calls[0] as unknown as [string,RequestInit];
+    expect(url).toBe("/v1/tenants/"+config.tenantId+"/discovery-sites?limit=50");
+    expect(options.method).toBeUndefined();
+    expect(options.body).toBeUndefined();
+  });
+  it("reads case-specific persisted source metadata with cursor",async()=>{
+    const fake=vi.fn(async()=>({ok:true,json:async()=>({
+      sources:[{id:config.tenantId,document_label:"Source",page:3}],
+      next_cursor:null,limit:50
+    })}));
+    vi.stubGlobal("fetch",fake);
+    const api=new DiscoveryClient(config);
+    const page=await api.sources(config.tenantId,"123e4567-e89b-42d3-a456-426614174001");
+    expect(page.sources[0].document_label).toBe("Source");
+    const [url]=fake.mock.calls[0] as unknown as [string];
+    expect(url).toContain("/research-cases/"+config.tenantId+"/sources?limit=50&after=");
+  });
 });

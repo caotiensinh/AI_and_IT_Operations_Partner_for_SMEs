@@ -1,10 +1,9 @@
 import React, {useEffect,useMemo,useRef,useState} from "react";
 import {createRoot} from "react-dom/client";
-import {Case,Requirement,ReviewHistory,DiscoveryClient,validUuid} from "./api";
+import {Case,Requirement,ReviewHistory,Site,Source,DiscoveryClient,validUuid} from "./api";
 import "./style.css";
 
 const UUID_EMPTY="00000000-0000-4000-8000-000000000000";
-type SourceDraft={id:string;label:string;page:number};
 function App(){
   const [tenant,setTenant]=useState("");
   const [token,setToken]=useState("");
@@ -16,7 +15,10 @@ function App(){
   const [reqCursor,setReqCursor]=useState<string|null>(null);
   const [activeReq,setActiveReq]=useState<Requirement|null>(null);
   const [history,setHistory]=useState<ReviewHistory|null>(null);
-  const [sources,setSources]=useState<SourceDraft[]>([]);
+  const [sources,setSources]=useState<Source[]>([]);
+  const [sourceCursor,setSourceCursor]=useState<string|null>(null);
+  const [sites,setSites]=useState<Site[]>([]);
+  const [siteCursor,setSiteCursor]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -38,8 +40,8 @@ function App(){
   const pendingRequirement=useRef<{id:string;body:string}|null>(null);
   const client=useMemo(()=>connected?new DiscoveryClient({tenantId:tenant,token}):null,[connected,tenant,token]);
 
-  const resetCase=()=>{setSelected(null);setRequirements([]);setReqCursor(null);setActiveReq(null);setHistory(null);setSources([]);};
-  function disconnect(){setConnected(false);setToken("");setCases([]);setCaseCursor(null);resetCase();setNotice("");setError("");pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;}
+  const resetCase=()=>{setSelected(null);setRequirements([]);setReqCursor(null);setActiveReq(null);setHistory(null);setSources([]);setSourceCursor(null);};
+  function disconnect(){setConnected(false);setToken("");setCases([]);setSites([]);setSiteCursor(null);setCaseCursor(null);resetCase();setNotice("");setError("");pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;}
   async function run(task:()=>Promise<void>){
     if(busy)return;setBusy(true);setError("");setNotice("");
     try{await task();}catch(e){setError(e instanceof Error?e.message:"処理に失敗しました。");}
@@ -50,6 +52,16 @@ function App(){
     setCases(previous=>cursor?[...previous,...page.cases]:page.cases);
     setCaseCursor(page.next_cursor);
   }
+  async function loadSites(api:DiscoveryClient,cursor:string|null=null){
+    const page=await api.sites(cursor);
+    setSites(previous=>cursor?[...previous,...page.sites]:page.sites);
+    setSiteCursor(page.next_cursor);
+  }
+  async function loadSources(api:DiscoveryClient,caseId:string,cursor:string|null=null){
+    const page=await api.sources(caseId,cursor);
+    setSources(previous=>cursor?[...previous,...page.sources]:page.sources);
+    setSourceCursor(page.next_cursor);
+  }
   async function loadRequirements(api:DiscoveryClient,caseId:string,cursor:string|null=null){
     const page=await api.requirements(caseId,cursor);
     setRequirements(previous=>cursor?[...previous,...page.requirements]:page.requirements);
@@ -59,7 +71,7 @@ function App(){
     if(!validUuid(tenant)||!token.trim()){setError("Tenant UUID とセッショントークンを入力してください。");return;}
     const api=new DiscoveryClient({tenantId:tenant,token});
     void run(async()=>{
-      await loadCases(api);
+      await Promise.all([loadCases(api),loadSites(api)]);
       setConnected(true);
       resetCase();
       setNotice("接続しました。");
@@ -68,8 +80,8 @@ function App(){
   function selectCase(item:Case){
     if(!client)return;
     void run(async()=>{
-      await loadRequirements(client,item.id);
-      setSelected(item);setActiveReq(null);setHistory(null);setSources([]);pendingSource.current=null;pendingRequirement.current=null;
+      await Promise.all([loadRequirements(client,item.id),loadSources(client,item.id)]);
+      setSelected(item);setActiveReq(null);setHistory(null);pendingSource.current=null;pendingRequirement.current=null;
       setTab("requirements");
     });
   }
@@ -94,7 +106,9 @@ function App(){
       setShowCreate(false);setNewLabel("");pendingCreate.current=null;
       const page=await client.cases();
       const found=page.cases.find(c=>c.id===created.case_id);
-      if(found){setSelected(found);await loadRequirements(client,found.id);setSources([]);}
+      if(found){setSelected(found);
+        await Promise.all([loadRequirements(client,found.id),loadSources(client,found.id)]);
+      }
       setNotice("調査案件を登録しました。");
     });
   }
@@ -107,7 +121,7 @@ function App(){
     const id=pendingSource.current.id;
     void run(async()=>{
       await client.addSource(selected.id,id,sourceLabel,Number(sourcePage));
-      setSources(prev=>prev.some(src=>src.id===id)?prev:[...prev,{id,label:sourceLabel.trim(),page:Number(sourcePage)}]);
+      await loadSources(client,selected.id);
       pendingSource.current=null;
       setSourceLabel("");setSourcePage("1");setNotice("資料情報を登録しました。原本ファイルはアップロードされません。");
     });
@@ -172,7 +186,12 @@ function App(){
         <label className="sr-only" htmlFor="case-search">案件を検索</label>
         <input id="case-search" className="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="案件を検索…"/>
         {showCreate&&<section className="create-card"><h3>新しい調査案件</h3>
-          <label>Site UUID<input value={newSite} onChange={e=>setNewSite(e.target.value)} placeholder="Site UUID"/></label>
+          <label>対象拠点<select aria-label="対象拠点" value={newSite} onChange={e=>setNewSite(e.target.value)}>
+            <option value="">拠点を選択してください</option>
+            {sites.map(site=><option key={site.id} value={site.id}>{site.label}</option>)}
+          </select></label>
+          {siteCursor&&<button type="button" className="more" disabled={busy} onClick={()=>client&&void run(()=>loadSites(client,siteCursor))}>拠点をさらに読み込む</button>}
+          {sites.length===0&&<p className="muted">作成権限のある拠点がありません。</p>}
           <label>案件名<input value={newLabel} onChange={e=>setNewLabel(e.target.value)} maxLength={200} placeholder="例：業務改善調査"/></label>
           <label>業種分類<select value={newCompany} onChange={e=>setNewCompany(e.target.value)}>
             <option value="OTHER">その他</option><option value="B">サロン</option><option value="J">シェアードサービス</option><option value="L">製造</option><option value="R">工業・技術</option>
@@ -208,8 +227,11 @@ function App(){
               <label>課題・期待する成果<textarea value={reqText} onChange={e=>setReqText(e.target.value)} maxLength={4000} placeholder="確認した事実を具体的に記載…" rows={3}/></label>
               <label>根拠レベル<select value={classification} onChange={e=>setClassification(e.target.value as typeof classification)}>
                 <option value="unverified">未検証</option><option value="inferred">推定</option><option value="explicit">原本に明記</option></select></label>
-              <label>出典 UUID（明示の場合必須）<input value={chosenSource} onChange={e=>setChosenSource(e.target.value)} list="source-ids" placeholder="資料登録後にUUIDを指定"/>
-                <datalist id="source-ids">{sources.map(source=><option key={source.id} value={source.id}>{source.label}</option>)}</datalist></label>
+              <label>出典資料（明示の場合必須）<select aria-label="出典資料（明示の場合必須）" value={chosenSource} onChange={e=>setChosenSource(e.target.value)}>
+                <option value="">出典なし</option>
+                {sources.map(source=><option key={source.id} value={source.id}>{source.document_label} · p.{source.page}</option>)}
+              </select></label>
+              {sourceCursor&&<button type="button" className="more" disabled={busy} onClick={()=>client&&void run(()=>loadSources(client,selected.id,sourceCursor))}>出典をさらに読み込む</button>}
               <button className="primary" type="submit" disabled={busy}>要件を登録</button>
             </form></section>
             <aside className="detail panel">
@@ -237,10 +259,11 @@ function App(){
                 <label>資料の表示名<input maxLength={200} required value={sourceLabel} onChange={e=>setSourceLabel(e.target.value)} placeholder="例：関係者インタビュー記録"/></label>
                 <label>ページ番号<input type="number" min={1} required value={sourcePage} onChange={e=>setSourcePage(e.target.value)}/></label>
                 <button className="primary" disabled={busy}>資料情報を登録</button></form>
-              <h3>この画面で登録した資料</h3>
-              {sources.length===0?<p className="empty">今のセッションで登録した資料はありません。既存資料の一覧取得APIは未実装です。</p>:
-                sources.map(source=><div className="source-row" key={source.id}><strong>{source.label}</strong><small>p.{source.page} · {source.id}</small>
+              <h3>登録済み資料</h3>
+              {sources.length===0?<p className="empty">登録済みの資料はありません。</p>:
+                sources.map(source=><div className="source-row" key={source.id}><strong>{source.document_label}</strong><small>p.{source.page} · {source.id}</small>
                 <button className="quiet" onClick={()=>{void navigator.clipboard?.writeText(source.id);}}>UUIDをコピー</button></div>)}
+              {sourceCursor&&<button className="more" disabled={busy} onClick={()=>client&&void run(()=>loadSources(client,selected.id,sourceCursor))}>さらに読み込む</button>}
             </section>}
         </>}
       </main>

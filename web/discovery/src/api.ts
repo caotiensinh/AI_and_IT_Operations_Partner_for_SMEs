@@ -1,11 +1,15 @@
 /** Typed same-origin discovery client. Tokens are intentionally memory-only. */
 export type Case = { id:string; site_id:string; label:string; company_code:string; status:string };
+export type Site = { id:string;label:string };
+export type Source = { id:string;document_label:string;page:number };
 export type Evidence = { document_label:string; page:number } | null;
 export type Requirement = { id:string; statement:string; classification:"explicit"|"inferred"|"unverified"; approval_state:"proposed"|"confirmed"|"rejected"; source:Evidence };
 export type Review = { version:number; previous_state:string; next_state:string; rationale:string; reviewer_id:string; reviewed_at:string };
 export type ReviewHistory = { approval_state:string; review_version:number; reviews:Review[] };
 export type Page<T> = { limit:number; next_cursor:string|null } & T;
 export type CasePage = Page<{cases:Case[]}>;
+export type SitePage = Page<{sites:Site[]}>;
+export type SourcePage = Page<{sources:Source[]}>;
 export type RequirementPage = Page<{requirements:Requirement[]}>;
 export type Config = {tenantId:string; token:string};
 
@@ -33,6 +37,13 @@ export class DiscoveryClient {
   }
   cases(after:string|null=null):Promise<CasePage>{
     return this.request("/research-cases?limit=50"+(after?"&after="+encodeURIComponent(after):""));
+  }
+  sites(after:string|null=null):Promise<SitePage>{
+    return this.request("/discovery-sites?limit=50"+(after?"&after="+encodeURIComponent(after):""));
+  }
+  sources(caseId:string,after:string|null=null):Promise<SourcePage>{
+    return this.request("/research-cases/"+caseId+"/sources?limit=50"+
+      (after?"&after="+encodeURIComponent(after):""));
   }
   requirements(caseId:string,after:string|null=null):Promise<RequirementPage>{
     return this.request("/research-cases/"+caseId+"/requirements?limit=50"+

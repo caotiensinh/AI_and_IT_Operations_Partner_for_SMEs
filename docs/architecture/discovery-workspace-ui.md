@@ -5,9 +5,9 @@
 ## User workflow
 1. Enter a *synthetic/test* tenant UUID and opaque bearer session token obtained from the disposable environment. The token is held only in React memory, never in localStorage, sessionStorage, URL/query string, cookies, or source code. Disconnect clears state. Reload requires reconnect.
 2. Read site/tenant-authorized case list. UUID cursor pagination follows backend `next_cursor`; search filters only currently loaded items, not a global backend search.
-3. Create case with site UUID and company archetype; use a stable `Idempotency-Key` until the logical create has returned. A failed request may be retried with the same key while form content stays unchanged.
+3. Create case by selecting an authorized site label (provided by the backend) and company archetype; use a stable `Idempotency-Key` until the logical create has returned. A failed request may be retried with the same key while form content stays unchanged.
 4. Select case, read paginated requirements, see classification, approval state and source label/page.
-5. Register metadata-only evidence source (label, page, client-generated UUID). Only source UUIDs created in this browser session can be suggested automatically; there is no source-list endpoint. The UUID may be manually entered for previously authorized sources.
+5. Register metadata-only evidence source (label, page, client-generated UUID). Existing source metadata is now retrieved from the backend for the selected case; source choices are displayed by document label/page, including after reconnect.
 6. Add a business requirement; `explicit` classification requires source UUID. `inferred` and `unverified` remain unconfirmed/proposed.
 7. Select a requirement to fetch manager-only review history, review-version and rationale. A manager can submit rejection or confirm an explicit source-backed requirement with at least eight characters of rationale.
 
@@ -32,8 +32,8 @@ API server must already be running with a disposable PostgreSQL instance and mig
 - Pending write state only in browser memory. A reload mid-flight loses that state; for robust retry, add server-assisted reconciliation and durable client operation IDs before production.
 
 ## Known gaps / next acceptance
-- No tenant/site picker populated by backend: site UUID is manually supplied in the pilot.
-- No source listing API or metadata detail, and no backend global search.
+- No tenant picker (tenant UUID is still manually supplied in the pilot); the creation-site picker is now populated by a permission-scoped backend endpoint.
+- Source metadata listing is available with cursor pagination, but no raw document retrieval, document update or backend global search exists.
 - No user-facing formal customer consent or signed decision workflow.
 - No production-grade OIDC frontend login, no end-to-end Playwright test with a real browser yet, no deployed environment.
 - Not allowed for real customer documents, tokens or personal information until the platform security acceptance is complete.
