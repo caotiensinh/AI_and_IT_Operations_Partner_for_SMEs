@@ -109,7 +109,7 @@ class BrowserOIDCTests(unittest.TestCase):
     def test_wrong_browser_binding_and_missing_parameters_denied(self):
         self.client.get("/auth/oidc/start")
         self.client.cookies.set("__Host-sme_oidc_binding", secrets.token_urlsafe(32),
-                                domain="pilot.example", path="/", secure=True)
+                                domain="pilot.example", path="/")
         wrong = self.client.get("/auth/oidc/callback", params={
             "state": self.flow.expected_state, "code": "synthetic-code",
         })
