@@ -15,7 +15,7 @@ test("real PostgreSQL: create case → source → explicit requirement → revie
   await page.getByLabel("Tenant UUID").fill(fixture.tenant);
   await page.getByLabel("セッショントークン").fill(fixture.token);
   await page.getByRole("button",{name:"接続する"}).click();
-  await expect(page.getByRole("heading",{name:"調査案件"})).toBeVisible();
+  await expect(page.getByRole("heading",{name:"調査案件",exact:true})).toBeVisible();
 
   await page.getByRole("button",{name:"＋ 新規"}).click();
   await page.getByLabel("Site UUID").fill(fixture.site);
@@ -58,5 +58,5 @@ test("invalid session cannot enter workspace",async({page})=>{
   await page.getByLabel("セッショントークン").fill("A".repeat(43));
   await page.getByRole("button",{name:"接続する"}).click();
   await expect(page.getByRole("alert")).toContainText("権限");
-  await expect(page.getByRole("heading",{name:"調査案件"})).toHaveCount(0);
+  await expect(page.getByRole("heading",{name:"調査案件",exact:true})).toHaveCount(0);
 });
