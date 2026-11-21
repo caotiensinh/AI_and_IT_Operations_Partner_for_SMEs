@@ -86,7 +86,11 @@ def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = No
             # Current time is controlled by PyJWT internally; explicit temporal
             # checks below allow deterministic boundary tests and future clocks.
         )
-        if expected_nonce is not None:\n            nonce = claims.get("nonce")\n            if not isinstance(nonce, str) or not hmac.compare_digest(nonce, expected_nonce):\n                raise AuthenticationDenied("invalid login nonce")\n        sub = claims["sub"]
+        if expected_nonce is not None:
+            nonce = claims.get("nonce")
+            if not isinstance(nonce, str) or not hmac.compare_digest(nonce, expected_nonce):
+                raise AuthenticationDenied("invalid login nonce")
+        sub = claims["sub"]
         issued_at = claims["iat"]
         expires_at = claims["exp"]
         aud = claims["aud"]
