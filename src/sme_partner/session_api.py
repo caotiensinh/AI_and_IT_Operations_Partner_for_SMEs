@@ -11,7 +11,7 @@ from collections.abc import Callable
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import FastAPI, Header, HTTPException, Response
+from fastapi import FastAPI, Header, HTTPException, Response, Request
 
 from .rbac import Action, Assignment, PermissionDenied, Resource, Role, ScopeType, require_permission
 from .tenant_context import AuthorizedTenantContext, TenantAccessDenied
@@ -29,12 +29,21 @@ def _digest(authorization: str | None) -> bytes:
     return hashlib.sha256(token.encode("ascii")).digest()
 
 
+def _request_digest(authorization: str | None, request: Request) -> bytes:
+    if authorization:
+        return _digest(authorization)
+    cookie = request.cookies.get("__Host-sme_session")
+    if cookie:
+        return _digest("Bearer " + cookie)
+    return _digest(None)
+
+
 def create_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
     app = FastAPI(title="SME Partner Protected API", version="0.1.0")
 
     @app.get("/v1/tenants/{tenant_id}/assets")
-    def list_assets(tenant_id: UUID, authorization: str | None = Header(default=None)):
-        digest = _digest(authorization)
+    def list_assets(tenant_id: UUID, request: Request, authorization: str | None = Header(default=None)):
+        digest = _request_digest(authorization, request)
         with connect() as conn:
             with conn.transaction():
                 # Runtime API privilege: never use the provisioning or table-owner role.
@@ -78,6 +87,22 @@ def create_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                 if not audit_ok:
                     raise HTTPException(403, "audit authorization denied")
                 return {"tenant_id": str(tenant_id), "assets": items}
+
+    @app.get("/v1/me/tenants")
+    def my_tenants(request: Request, authorization: str | None = Header(default=None)):
+        digest = _request_digest(authorization, request)
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                rows = conn.execute(
+                    "SELECT tenant_id,display_name FROM sme.list_session_tenants(%s)",
+                    (digest,),
+                ).fetchall()
+                if not rows:
+                    raise HTTPException(403, "no active tenant membership")
+                return {"tenants": [
+                    {"id": str(tenant_id), "name": name} for tenant_id,name in rows
+                ]}
 
     @app.post("/v1/session/logout", status_code=204)
     def logout(authorization: str | None = Header(default=None)):

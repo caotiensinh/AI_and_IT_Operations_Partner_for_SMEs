@@ -29,7 +29,7 @@ class SessionApiE2ETests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.admin = psycopg.connect(DSN, autocommit=True)
-        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql"):
+        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql", "0006_tenant_selector.sql"):
             cls.admin.execute((ROOT / "migrations" / name).read_text())
         cls.a,cls.b,cls.user,cls.other,cls.site_a,cls.site_b,cls.asset_a,cls.asset_b = (uuid4() for _ in range(8))
         cls.token = _token()
@@ -74,6 +74,28 @@ class SessionApiE2ETests(unittest.TestCase):
             f"/v1/tenants/{tenant}/assets",
             headers={"Authorization":f"Bearer {token}"} if token else {},
         )
+
+    def test_browser_cookie_can_read_authorized_tenant(self):
+        r=self.client.get(f"/v1/tenants/{self.a}/assets",
+            headers={"Cookie":f"__Host-sme_session={self.token}"})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual([x["name"] for x in r.json()["assets"]],["Asset A"])
+
+    def test_browser_cookie_cannot_switch_to_foreign_tenant(self):
+        r=self.client.get(f"/v1/tenants/{self.b}/assets",
+            headers={"Cookie":f"__Host-sme_session={self.token}"})
+        self.assertEqual(r.status_code,403)
+
+    def test_tenant_selector_lists_only_active_membership(self):
+        r=self.client.get("/v1/me/tenants",
+            headers={"Cookie":f"__Host-sme_session={self.token}"})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual([v["id"] for v in r.json()["tenants"]],[str(self.a)])
+
+    def test_tenant_selector_rejects_unknown_token(self):
+        r=self.client.get("/v1/me/tenants",
+            headers={"Cookie":f"__Host-sme_session={_token()}"})
+        self.assertEqual(r.status_code,403)
 
     def test_valid_tenant_returns_only_its_asset(self):
         r=self.get_assets(self.a,self.token)
