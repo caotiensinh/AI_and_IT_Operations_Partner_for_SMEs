@@ -23,7 +23,7 @@ class AsahiHTTPSTests(unittest.TestCase):
         )
         self.payload={"hostname":"asahi-node","timestamp":int(self.now.timestamp()),
                       "cpu_pct":35.5,"memory_pct":62.0,"uptime_s":100,"disks":[]}
-    def make_poller(self,response):
+    def make_poller(self,response,**kwargs):
         def handler(request):
             self.assertEqual(request.url.scheme,"https")
             self.assertEqual(request.url.path,"/api/agent/status")
@@ -31,7 +31,7 @@ class AsahiHTTPSTests(unittest.TestCase):
             return response(request) if callable(response) else response
         client=httpx.Client(transport=httpx.MockTransport(handler))
         self.addCleanup(client.close)
-        return AsahiHTTPSPoller(self.endpoint,client=client)
+        return AsahiHTTPSPoller(self.endpoint,client=client,**kwargs)
     def test_valid_snapshot_uses_trusted_binding(self):
         p={**self.payload,"tenant_id":str(uuid4()),"site_id":str(uuid4())}
         result=self.make_poller(httpx.Response(200,json=p)).poll(self.now)
@@ -63,7 +63,7 @@ class AsahiHTTPSTests(unittest.TestCase):
     def test_payload_size_limit(self):
         payload={**self.payload,"untrusted":"x"*2048}
         with self.assertRaises(AgentPollRejected):
-            self.make_poller(httpx.Response(200,json=payload)).poll(self.now)
+            self.make_poller(httpx.Response(200,json=payload),max_response_bytes=1024).poll(self.now)
     def test_stale_sample_rejected(self):
         p=dict(self.payload);p["timestamp"]=int((self.now-timedelta(hours=1)).timestamp())
         with self.assertRaises(AgentPollRejected):
