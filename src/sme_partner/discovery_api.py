@@ -279,4 +279,22 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                         "updated":status=="updated"}
 
 
+    @app.get("/v1/tenants/{tenant_id}/research-cases/{case_id}/requirements/{requirement_id}/reviews")
+    def requirement_review_history(tenant_id: UUID,case_id: UUID,requirement_id: UUID,
+                                   authorization: str | None = Header(default=None)):
+        digest=_digest(authorization)
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                row=conn.execute(
+                    "SELECT sme.get_discovery_requirement_review_history(%s,%s,%s,%s)",
+                    (digest,tenant_id,case_id,requirement_id),
+                ).fetchone()
+                if not row or row[0] is None:
+                    # Hide existence of restricted review history.
+                    raise HTTPException(403,"review history access denied")
+                return {"tenant_id":str(tenant_id),"case_id":str(case_id),
+                        "requirement_id":str(requirement_id),**row[0]}
+
+
     return app

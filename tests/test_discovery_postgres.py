@@ -30,7 +30,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
                      "0006_discovery_case_write.sql", "0007_discovery_idempotency.sql",
                      "0008_discovery_source_intake.sql",
                      "0009_discovery_requirement_intake.sql",
-                     "0010_discovery_requirement_review.sql"):
+                     "0010_discovery_requirement_review.sql",
+                     "0011_discovery_review_history_read.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -763,3 +764,55 @@ class DiscoveryPostgresTests(unittest.TestCase):
             with self.db.transaction():
                 self.db.execute("SET LOCAL ROLE sme_app")
                 self.db.execute("SELECT * FROM sme.discovery_requirement_reviews")
+
+    def test_review_history_manager_reads_reviewer_and_reason(self):
+        self._with_manager()
+        url=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements/{self.req_id}/reviews"
+        try:
+            before=self.client.get(url,headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(before.status_code,200,before.text)
+            self.assertEqual(before.json()["reviews"],[])
+            self.assertEqual(before.json()["review_version"],0)
+            decision=self._review(self.req_id,"confirmed")
+            self.assertEqual(decision.status_code,200,decision.text)
+            history=self.client.get(url,headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(history.status_code,200,history.text)
+            self.assertEqual(history.json()["approval_state"],"confirmed")
+            self.assertEqual(history.json()["review_version"],1)
+            self.assertEqual(len(history.json()["reviews"]),1)
+            item=history.json()["reviews"][0]
+            self.assertEqual((item["version"],item["next_state"],item["previous_state"]),
+                             (1,"confirmed","proposed"))
+            self.assertEqual(item["reviewer_id"],str(self.ia))
+            self.assertEqual(item["rationale"],"Reviewed supporting evidence")
+            self.assertIn("reviewed_at",item)
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_change_events "
+                            "WHERE tenant_id=%s AND subject_id=%s AND action='requirement.reviewed'",
+                            (self.a,self.req_id))
+            self.db.execute("DELETE FROM sme.discovery_requirement_reviews "
+                            "WHERE tenant_id=%s AND requirement_id=%s",(self.a,self.req_id))
+            self.db.execute("UPDATE sme.discovery_requirements "
+                            "SET approval_state='proposed',review_version=0 "
+                            "WHERE tenant_id=%s AND id=%s",(self.a,self.req_id))
+            self._restore_viewer()
+
+    def test_review_history_viewer_wrong_tenant_and_unknown_denied(self):
+        endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements/{self.req_id}/reviews"
+        headers={"Authorization":f"Bearer {self.token}"}
+        self.assertEqual(self.client.get(endpoint,headers=headers).status_code,403)
+        self.assertEqual(self.client.get(endpoint).status_code,401)
+        self._with_manager()
+        try:
+            wrong=f"/v1/tenants/{self.b}/research-cases/{self.cb}/requirements/{self.req_id}/reviews"
+            self.assertEqual(self.client.get(wrong,headers=headers).status_code,403)
+            missing=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements/{uuid4()}/reviews"
+            self.assertEqual(self.client.get(missing,headers=headers).status_code,403)
+        finally:
+            self._restore_viewer()
+
+    def test_runtime_cannot_select_review_history_table_directly(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("SELECT rationale FROM sme.discovery_requirement_reviews")
