@@ -27,7 +27,7 @@ class DiscoveryPostgresTests(unittest.TestCase):
         cls.db = psycopg.connect(DSN, autocommit=True)
         for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
                      "0003_session_boundary.sql", "0005_discovery_read_model.sql",
-                     "0006_discovery_case_write.sql"):
+                     "0006_discovery_case_write.sql", "0007_discovery_idempotency.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -285,11 +285,13 @@ class DiscoveryPostgresTests(unittest.TestCase):
                                   headers={"Authorization":f"Bearer {self.token}"})
                 self.assertEqual(r.status_code,422,r.text)
 
-    def post_case(self, tenant=None, site=None, token=None, label="Process assessment"):
+    def post_case(self, tenant=None, site=None, token=None, label="Process assessment", key=None):
+        headers={"Idempotency-Key": key or secrets.token_urlsafe(24)}
+        if token: headers["Authorization"]=f"Bearer {token}"
         return self.client.post(
             f"/v1/tenants/{tenant or self.a}/research-cases",
             json={"site_id":str(site or self.sa),"label":label,"company_code":"OTHER"},
-            headers={"Authorization":f"Bearer {token}"} if token else {},
+            headers=headers,
         )
 
     def test_case_create_manager_site_permission_and_atomic_audit(self):
@@ -315,6 +317,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
             self.assertEqual(audit,[(self.ia,"case.created")])
         finally:
             if created:
+                self.db.execute("DELETE FROM sme.discovery_create_requests "
+                                "WHERE tenant_id=%s AND case_id=%s",(self.a,created))
                 self.db.execute("DELETE FROM sme.discovery_change_events "
                                 "WHERE tenant_id=%s AND case_id=%s",(self.a,created))
                 self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
@@ -376,3 +380,95 @@ class DiscoveryPostgresTests(unittest.TestCase):
                 self.db.execute("INSERT INTO sme.discovery_cases "
                                 "(tenant_id,id,site_id,label,company_code) "
                                 "VALUES (%s,%s,%s,'Bypass','OTHER')",(self.a,uuid4(),self.sa))
+
+    def test_replay_is_single_case_single_audit(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type,site_id) "
+                        "VALUES (%s,%s,%s,'manager','site',%s)",
+                        (self.a,uuid4(),self.ia,self.sa))
+        key=secrets.token_urlsafe(24)
+        created=None
+        try:
+            a=self.post_case(token=self.token,key=key)
+            b=self.post_case(token=self.token,key=key)
+            self.assertEqual((a.status_code,b.status_code),(201,200),(a.text,b.text))
+            self.assertFalse(a.json()["replayed"])
+            self.assertTrue(b.json()["replayed"])
+            created=a.json()["case_id"]
+            self.assertEqual(created,b.json()["case_id"])
+            counts=self.db.execute(
+                "SELECT (SELECT count(*) FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s),"
+                "(SELECT count(*) FROM sme.discovery_change_events WHERE tenant_id=%s AND case_id=%s)",
+                (self.a,created,self.a,created)).fetchone()
+            self.assertEqual(counts,(1,1))
+            conflict=self.post_case(token=self.token,key=key,label="Different payload")
+            self.assertEqual(conflict.status_code,409,conflict.text)
+        finally:
+            if created:
+                self.db.execute("DELETE FROM sme.discovery_create_requests WHERE tenant_id=%s AND case_id=%s",
+                                (self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_change_events WHERE tenant_id=%s AND case_id=%s",
+                                (self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                                (self.a,created))
+            self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                            (self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) VALUES (%s,%s,%s,'viewer','tenant')",
+                            (self.a,uuid4(),self.ia))
+
+    def test_idempotency_key_validation(self):
+        for key in (None,"short","X"*129,"x"*20+"!","not space allowed"):
+            with self.subTest(key=key):
+                result=self.client.post(
+                    f"/v1/tenants/{self.a}/research-cases",
+                    json={"site_id":str(self.sa),"label":"Case","company_code":"OTHER"},
+                    headers={"Authorization":f"Bearer {self.token}",
+                             **({"Idempotency-Key":key} if key else {})})
+                self.assertEqual(result.status_code,422,result.text)
+
+    def test_legacy_non_idempotent_function_execute_revoked(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("SELECT sme.create_discovery_case(%s,%s,%s,%s,%s)",
+                                (hashlib.sha256(self.token.encode()).digest(),
+                                 self.a,self.sa,"Unsafe duplicate","OTHER"))
+
+    def test_concurrent_replay_same_key(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type) "
+                        "VALUES (%s,%s,%s,'manager','tenant')",
+                        (self.a,uuid4(),self.ia))
+        key=secrets.token_urlsafe(24)
+        created=None
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                pending=[pool.submit(self.post_case,token=self.token,key=key) for _ in range(2)]
+                results=[p.result(timeout=20) for p in pending]
+            self.assertEqual(sorted(r.status_code for r in results),[200,201],
+                             [r.text for r in results])
+            created=results[0].json()["case_id"]
+            self.assertEqual(created,results[1].json()["case_id"])
+            events=self.db.execute(
+                "SELECT count(*) FROM sme.discovery_change_events "
+                "WHERE tenant_id=%s AND case_id=%s",(self.a,created)).fetchone()[0]
+            self.assertEqual(events,1)
+        finally:
+            if created:
+                self.db.execute("DELETE FROM sme.discovery_create_requests WHERE tenant_id=%s AND case_id=%s",
+                                (self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_change_events WHERE tenant_id=%s AND case_id=%s",
+                                (self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                                (self.a,created))
+            self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                            (self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
