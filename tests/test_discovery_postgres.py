@@ -816,3 +816,121 @@ class DiscoveryPostgresTests(unittest.TestCase):
             with self.db.transaction():
                 self.db.execute("SET LOCAL ROLE sme_app")
                 self.db.execute("SELECT rationale FROM sme.discovery_requirement_reviews")
+
+    def test_site_picker_only_write_authorized_scope(self):
+        endpoint=f"/v1/tenants/{self.a}/discovery-sites"
+        headers={"Authorization":f"Bearer {self.token}"}
+        # Viewing cases never implicitly grants the ability to create cases.
+        denied=self.client.get(endpoint,headers=headers)
+        self.assertEqual(denied.status_code,200,denied.text)
+        self.assertEqual(denied.json()["sites"],[])
+        self._with_manager()
+        other_site=uuid4()
+        self.db.execute("INSERT INTO sme.sites(tenant_id,id,label) "
+                        "VALUES (%s,%s,'Restricted site')",(self.a,other_site))
+        try:
+            page=self.client.get(endpoint,headers=headers,params={"limit":1})
+            self.assertEqual(page.status_code,200,page.text)
+            self.assertEqual(page.json()["sites"],[{"id":str(self.sa),"label":"A site"}])
+            self.assertIsNone(page.json()["next_cursor"])
+            self.assertNotIn(str(other_site),str(page.json()))
+            self.assertEqual(self.client.get(
+                f"/v1/tenants/{self.b}/discovery-sites",headers=headers).status_code,403)
+            self.assertEqual(self.client.get(endpoint).status_code,401)
+            for params in ({"limit":0},{"limit":101},{"after":"bogus"}):
+                self.assertEqual(self.client.get(
+                    endpoint,params=params,headers=headers).status_code,422)
+        finally:
+            self.db.execute("DELETE FROM sme.sites WHERE tenant_id=%s AND id=%s",
+                            (self.a,other_site))
+            self._restore_viewer()
+
+    def test_tenant_manager_site_picker_keyset_pagination(self):
+        second=uuid4()
+        self.db.execute("INSERT INTO sme.sites(tenant_id,id,label) "
+                        "VALUES (%s,%s,'Site two')",(self.a,second))
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type) "
+                        "VALUES (%s,%s,%s,'manager','tenant')",
+                        (self.a,uuid4(),self.ia))
+        try:
+            endpoint=f"/v1/tenants/{self.a}/discovery-sites"
+            headers={"Authorization":f"Bearer {self.token}"}
+            first=self.client.get(endpoint,headers=headers,params={"limit":1})
+            self.assertEqual(first.status_code,200,first.text)
+            self.assertIsNotNone(first.json()["next_cursor"])
+            second_page=self.client.get(endpoint,headers=headers,params={
+                "limit":1,"after":first.json()["next_cursor"]})
+            self.assertEqual(second_page.status_code,200,second_page.text)
+            self.assertIsNone(second_page.json()["next_cursor"])
+            ids={first.json()["sites"][0]["id"],second_page.json()["sites"][0]["id"]}
+            self.assertEqual(ids,{str(self.sa),str(second)})
+        finally:
+            self.db.execute("DELETE FROM sme.sites WHERE tenant_id=%s AND id=%s",
+                            (self.a,second))
+            self._restore_viewer()
+
+    def test_source_list_existing_case_read_role_and_pagination(self):
+        second=uuid4()
+        self.db.execute("INSERT INTO sme.discovery_sources "
+                        "(tenant_id,id,case_id,document_label,source_page) "
+                        "VALUES (%s,%s,%s,'Second reference',9)",
+                        (self.a,second,self.ca))
+        try:
+            endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/sources"
+            headers={"Authorization":f"Bearer {self.token}"}
+            first=self.client.get(endpoint,headers=headers,params={"limit":1})
+            self.assertEqual(first.status_code,200,first.text)
+            self.assertIsNotNone(first.json()["next_cursor"])
+            second_page=self.client.get(endpoint,headers=headers,params={
+                "limit":1,"after":first.json()["next_cursor"]})
+            self.assertEqual(second_page.status_code,200,second_page.text)
+            self.assertIsNone(second_page.json()["next_cursor"])
+            both=first.json()["sources"]+second_page.json()["sources"]
+            self.assertEqual({x["id"] for x in both},{str(self.source),str(second)})
+            self.assertEqual({x["page"] for x in both},{1,9})
+            self.assertEqual(self.client.get(endpoint).status_code,401)
+            self.assertEqual(self.client.get(
+                f"/v1/tenants/{self.b}/research-cases/{self.cb}/sources",
+                headers=headers).status_code,403)
+            for params in ({"limit":0},{"limit":101},{"after":"invalid"}):
+                self.assertEqual(self.client.get(
+                    endpoint,params=params,headers=headers).status_code,422)
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_sources WHERE tenant_id=%s AND id=%s",
+                            (self.a,second))
+
+    def test_source_list_hidden_site_is_404_not_metadata_leak(self):
+        other_site,other_case,other_source=uuid4(),uuid4(),uuid4()
+        self.db.execute("INSERT INTO sme.sites(tenant_id,id,label) VALUES (%s,%s,'Hidden')",
+                        (self.a,other_site))
+        self.db.execute("INSERT INTO sme.discovery_cases "
+                        "(tenant_id,id,site_id,label,company_code) "
+                        "VALUES (%s,%s,%s,'Hidden project','OTHER')",
+                        (self.a,other_case,other_site))
+        self.db.execute("INSERT INTO sme.discovery_sources "
+                        "(tenant_id,id,case_id,document_label,source_page) "
+                        "VALUES (%s,%s,%s,'Restricted source',1)",
+                        (self.a,other_source,other_case))
+        self._with_manager()
+        try:
+            headers={"Authorization":f"Bearer {self.token}"}
+            hidden=self.client.get(
+                f"/v1/tenants/{self.a}/research-cases/{other_case}/sources",
+                headers=headers)
+            self.assertEqual(hidden.status_code,404,hidden.text)
+            allowed=self.client.get(
+                f"/v1/tenants/{self.a}/research-cases/{self.ca}/sources",
+                headers=headers)
+            self.assertEqual(allowed.status_code,200,allowed.text)
+            self.assertNotIn("Restricted source",allowed.text)
+        finally:
+            self._restore_viewer()
+            self.db.execute("DELETE FROM sme.discovery_sources WHERE tenant_id=%s AND id=%s",
+                            (self.a,other_source))
+            self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                            (self.a,other_case))
+            self.db.execute("DELETE FROM sme.sites WHERE tenant_id=%s AND id=%s",
+                            (self.a,other_site))
