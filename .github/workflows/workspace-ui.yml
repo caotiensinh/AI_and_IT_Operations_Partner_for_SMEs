@@ -1,0 +1,26 @@
+name: Responsive workspace build
+on:
+  push:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/workspace-ui.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/workspace-ui.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: frontend
+      - name: Typecheck and production build
+        run: npm run build
+        working-directory: frontend
