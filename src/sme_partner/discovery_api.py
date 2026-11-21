@@ -81,6 +81,97 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                  for cid,site_id,label,company_code,status in page],
                 str(page[-1][0]) if len(rows)>limit else None)
 
+    @app.get("/v1/tenants/{tenant_id}/discovery-sites")
+    def list_writable_sites(tenant_id: UUID, limit: int = Query(default=50,ge=1,le=100),
+                            after: UUID | None = Query(default=None),
+                            authorization: str | None = Header(default=None)):
+        """Only provide sites where the authenticated user can CREATE a case."""
+        digest=_digest(authorization)
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                session=conn.execute(
+                    "SELECT sme.resolve_session(%s,%s)",(digest,tenant_id)
+                ).fetchone()
+                if not session or session[0] is None:
+                    raise HTTPException(403,"tenant access denied")
+                conn.execute("SELECT set_config('sme.tenant_id',%s,true)",(str(tenant_id),))
+                grants=conn.execute(
+                    "SELECT role,scope_type,site_id FROM sme.role_assignments "
+                    "WHERE tenant_id=%s AND identity_id=%s",
+                    (tenant_id,session[0]),
+                ).fetchall()
+                all_sites=any(role in ("owner","admin","manager") and scope=="tenant"
+                              for role,scope,site in grants)
+                scoped_sites=list({site for role,scope,site in grants
+                                   if role=="manager" and scope=="site" and site is not None})
+                if not all_sites and not scoped_sites:
+                    return {"tenant_id":str(tenant_id),"sites":[],"limit":limit,"next_cursor":None}
+                rows=conn.execute(
+                    "SELECT id,label FROM sme.sites WHERE tenant_id=%s "
+                    "AND (%s::uuid IS NULL OR id>%s::uuid) "
+                    "AND (%s OR id=ANY(%s::uuid[])) "
+                    "ORDER BY id LIMIT %s",
+                    (tenant_id,after,after,all_sites,scoped_sites,limit+1),
+                ).fetchall()
+                page=rows[:limit]
+                return {"tenant_id":str(tenant_id),"sites":[
+                    {"id":str(site_id),"label":label} for site_id,label in page],
+                    "limit":limit,
+                    "next_cursor":str(page[-1][0]) if len(rows)>limit else None}
+
+    @app.get("/v1/tenants/{tenant_id}/research-cases/{case_id}/sources")
+    def list_case_sources(tenant_id: UUID,case_id: UUID,
+                          limit: int = Query(default=50,ge=1,le=100),
+                          after: UUID | None = Query(default=None),
+                          authorization: str | None = Header(default=None)):
+        digest=_digest(authorization)
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                session=conn.execute(
+                    "SELECT sme.resolve_session(%s,%s)",(digest,tenant_id)
+                ).fetchone()
+                if not session or session[0] is None:
+                    raise HTTPException(403,"tenant access denied")
+                conn.execute("SELECT set_config('sme.tenant_id',%s,true)",(str(tenant_id),))
+                case=conn.execute(
+                    "SELECT site_id FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                    (tenant_id,case_id),
+                ).fetchone()
+                if not case:
+                    raise HTTPException(404,"case not found")
+                grants=conn.execute(
+                    "SELECT role,scope_type,site_id,department_id FROM sme.role_assignments "
+                    "WHERE tenant_id=%s AND identity_id=%s",(tenant_id,session[0]),
+                ).fetchall()
+                assignments=tuple(
+                    Assignment(tenant_id=tenant_id,identity_id=session[0],
+                               role=Role(role),scope_type=ScopeType(scope),
+                               scope_id=site if scope=="site" else
+                                   department if scope=="department" else None)
+                    for role,scope,site,department in grants
+                )
+                try:
+                    require_permission(
+                        AuthorizedTenantContext(session[0],tenant_id),assignments,
+                        Action.READ,Resource(tenant_id,case[0]),
+                    )
+                except (PermissionDenied,TenantAccessDenied):
+                    raise HTTPException(404,"case not found") from None
+                rows=conn.execute(
+                    "SELECT id,document_label,source_page FROM sme.discovery_sources "
+                    "WHERE tenant_id=%s AND case_id=%s "
+                    "AND (%s::uuid IS NULL OR id>%s::uuid) ORDER BY id LIMIT %s",
+                    (tenant_id,case_id,after,after,limit+1),
+                ).fetchall()
+                page=rows[:limit]
+                return {"tenant_id":str(tenant_id),"case_id":str(case_id),
+                        "sources":[{"id":str(uid),"document_label":label,"page":number}
+                                   for uid,label,number in page],
+                        "limit":limit,
+                        "next_cursor":str(page[-1][0]) if len(rows)>limit else None}
+
     @app.get("/v1/tenants/{tenant_id}/research-cases")
     def list_research_cases(tenant_id: UUID, limit: int = Query(default=50,ge=1,le=100),
                             after: UUID | None = Query(default=None),
