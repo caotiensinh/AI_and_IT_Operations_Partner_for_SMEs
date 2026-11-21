@@ -3,7 +3,7 @@
 Status: code + migrations committed; **not a production or customer intake service**.
 
 ## Migration and transaction boundaries
-Migration `0005_discovery_read_model.sql` requires foundation `0001`, scoped roles `0002`, and sessions `0003`. Run with a dedicated migration owner, never the runtime DB identity. The migration creates scoped cases, source references (metadata only; no PDF bytes) and requirement rows, all with composite tenant foreign keys and forced RLS. All three tables are **SELECT-only** for `sme_app`. No application permission to insert/update/delete and no public schema grants.
+Migration `0008_discovery_read_model.sql` requires foundation `0001`, scoped roles `0002`, and sessions `0003`. Run with a dedicated migration owner, never the runtime DB identity. The migration creates scoped cases, source references (metadata only; no PDF bytes) and requirement rows, all with composite tenant foreign keys and forced RLS. All three tables are **SELECT-only** for `sme_app`. No application permission to insert/update/delete and no public schema grants.
 
 Read APIs: `GET /v1/tenants/{tenant_id}/research-cases` and `GET /v1/tenants/{tenant_id}/research-cases/{case_id}/requirements`. It uses the existing opaque session hash, resolves active tenant membership server-side, sets the RLS context in the same transaction, reads trusted role assignments and filters resources through RBAC. Site-scope and tenant-scope grants are supported. Department-only grants will see no cases because a research case is site-bound until department scope exists. Exposes case ID/site ID, label, company-code and status; does not expose confidential source text or documents. Returns no more than 101 cases and is **not a complete pagination contract**.
 

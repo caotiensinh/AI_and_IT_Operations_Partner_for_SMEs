@@ -26,7 +26,7 @@ class DiscoveryPostgresTests(unittest.TestCase):
     def setUpClass(cls):
         cls.db = psycopg.connect(DSN, autocommit=True)
         for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
-                     "0003_session_boundary.sql", "0005_discovery_read_model.sql"):
+                     "0003_session_boundary.sql", "0008_discovery_read_model.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")

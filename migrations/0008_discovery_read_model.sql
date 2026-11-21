@@ -1,4 +1,4 @@
--- Research discovery read model. Requires 0001-0003 and PostgreSQL 15+.
+-- Research discovery read model. Requires 0001-0007 and PostgreSQL 15+.
 -- No application writes: audited provisioning/import service is future work.
 BEGIN;
 CREATE TABLE IF NOT EXISTS sme.discovery_cases (
