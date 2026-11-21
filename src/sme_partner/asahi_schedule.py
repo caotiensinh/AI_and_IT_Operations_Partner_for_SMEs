@@ -57,6 +57,7 @@ class ScheduledIngest:
         self.now_utc = now_utc
         self.retryable = retryable
         self.next_due = 0.0
+        self._retry_count = 0
         self._lock = Lock()
 
     def run_due(self) -> PollResult:
@@ -66,28 +67,25 @@ class ScheduledIngest:
             current = self.now_monotonic()
             if current < self.next_due:
                 return PollResult("not_due", 0, self.next_due)
-            attempts = 0
-            outcome = "failed"
-            for attempt in range(self.policy.max_attempts):
-                attempts += 1
-                observed = self.now_utc()
-                if observed.tzinfo is None:
-                    raise ValueError("UTC timestamp must be timezone-aware")
-                try:
-                    inserted = self.action(observed.astimezone(timezone.utc))
-                    outcome = "inserted" if inserted else "duplicate_or_rejected"
-                    break
-                except self.retryable:
-                    if attempt + 1 >= self.policy.max_attempts:
-                        outcome = "retry_exhausted"
-                        break
-                    # No sleep inside this primitive; retry happens at next tick.
+            attempts = 1
+            observed = self.now_utc()
+            if observed.tzinfo is None:
+                raise ValueError("UTC timestamp must be timezone-aware")
+            try:
+                inserted = self.action(observed.astimezone(timezone.utc))
+                self._retry_count = 0
+                outcome = "inserted" if inserted else "duplicate_or_rejected"
+            except self.retryable:
+                self._retry_count += 1
+                if self._retry_count < self.policy.max_attempts:
                     self.next_due = current + self.policy.retry_delay_seconds
                     return PollResult("retry_scheduled", attempts, self.next_due)
-                except Exception:
-                    # Do not swallow unexpected failures as a success.
-                    self.next_due = current + self.policy.interval_seconds
-                    raise
+                self._retry_count = 0
+                outcome = "retry_exhausted"
+            except Exception:
+                self._retry_count = 0
+                self.next_due = current + self.policy.interval_seconds
+                raise
             self.next_due = current + self.policy.interval_seconds
             return PollResult(outcome, attempts, self.next_due)
         finally:

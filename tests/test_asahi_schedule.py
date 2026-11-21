@@ -49,7 +49,8 @@ class ScheduleTests(unittest.TestCase):
                             )
         self.assertEqual(job.run_due().outcome, "retry_scheduled")
         self.mono += 5
-        self.assertEqual(job.run_due().outcome, "retry_scheduled")
+        self.assertEqual(job.run_due().outcome, "retry_exhausted")
+        self.assertEqual(job.run_due().outcome, "not_due")
 
     def test_security_failure_propagates(self):
         job = self.schedule(lambda t: (_ for _ in ()).throw(PermissionError("revoked")))

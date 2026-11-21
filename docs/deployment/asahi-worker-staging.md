@@ -6,7 +6,7 @@
 - The application login `sme_runtime` remains separate.
 - No direct enrollment SELECT or telemetry INSERT grants are added.
 - The scheduler is a pure in-process component with monotonic interval,
-  bounded retry deferral, non-overlap and explicit outcomes.
+  bounded retry deferral and attempt exhaustion, non-overlap and explicit outcomes.
 - Staging CI checks DB role grants and forbidden direct database operations.
 - Unit tests check run timing, transient failures, concurrency and invalid policy.
 
