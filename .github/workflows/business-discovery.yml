@@ -1,0 +1,24 @@
+name: business-discovery-contract
+on:
+  push:
+    paths:
+      - 'src/sme_partner/business_discovery.py'
+      - 'tests/test_business_discovery.py'
+      - '.github/workflows/business-discovery.yml'
+  pull_request:
+    paths:
+      - 'src/sme_partner/business_discovery.py'
+      - 'tests/test_business_discovery.py'
+      - '.github/workflows/business-discovery.yml'
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run isolated discovery model tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -p 'test_business_discovery.py' -v
