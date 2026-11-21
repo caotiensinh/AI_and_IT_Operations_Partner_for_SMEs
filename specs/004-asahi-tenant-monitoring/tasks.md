@@ -7,6 +7,6 @@
 - [x] T05: build responsive Monitoring table
 - [x] T06: implement PostgreSQL negative isolation tests
 - [x] T07: implement four-size Chromium tenant switch tests
-- [ ] T08: verify final CI result for HEAD
-- [ ] T09: merge PR after final CI passes
+- [x] T08: verify final CI result for PR #28 (six workflows PASS)
+- [x] T09: merge PR #28 into main after final CI passes
 - [ ] T10: separately design authorized device ingest (future feature)
