@@ -34,3 +34,5 @@ not production security certification.
 ## Next phases
 Implement real HTTPS/OIDC provider callback, auth-role split, object storage,
 secret manager, backup+restore drill, and tenant-aware Asahi metrics adapter.
+
+See [disposable recovery drill](recovery.md) for a basic SQL restore test.

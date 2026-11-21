@@ -54,6 +54,10 @@ jobs:
           docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
             psql -v ON_ERROR_STOP=1 -U postgres -d sme -c "SET ROLE sme_runtime; UPDATE sme.memberships SET status='active';" > /tmp/membership-probe.log 2>&1 && exit 1 || true
           grep -q 'permission denied' /tmp/membership-probe.log
+      - name: PostgreSQL backup and restore drill
+        env:
+          SME_E2E_FIXTURE_MODE: disposable_ci_only
+        run: sh scripts/staging_restore_drill.sh
       - name: Logs on failure
         if: failure()
         run: docker compose --env-file .env.staging -f compose.staging.yml logs --no-color --tail=70 || true
