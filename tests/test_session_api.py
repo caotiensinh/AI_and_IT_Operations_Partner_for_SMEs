@@ -29,7 +29,7 @@ class SessionApiE2ETests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.admin = psycopg.connect(DSN, autocommit=True)
-        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql", "0006_tenant_selector.sql"):
+        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql", "0006_tenant_selector.sql", "0007_membership_least_privilege.sql"):
             cls.admin.execute((ROOT / "migrations" / name).read_text())
         cls.a,cls.b,cls.user,cls.other,cls.site_a,cls.site_b,cls.asset_a,cls.asset_b = (uuid4() for _ in range(8))
         cls.token = _token()
@@ -173,6 +173,31 @@ class SessionApiE2ETests(unittest.TestCase):
                 (hashlib.sha256(self.token.encode()).digest(),self.b,uuid4())
             ).fetchone()[0]
             self.assertFalse(result)
+
+    def test_runtime_cannot_self_enroll_membership(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.admin.transaction():
+                self.admin.execute("SET LOCAL ROLE sme_app")
+                self.admin.execute("SELECT set_config('sme.tenant_id',%s,true)",(str(self.b),))
+                self.admin.execute(
+                    "INSERT INTO sme.memberships(tenant_id,identity_id,status) VALUES (%s,%s,'active')",
+                    (self.b,self.user))
+
+    def test_runtime_cannot_change_membership(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.admin.transaction():
+                self.admin.execute("SET LOCAL ROLE sme_app")
+                self.admin.execute("SELECT set_config('sme.tenant_id',%s,true)",(str(self.a),))
+                self.admin.execute(
+                    "UPDATE sme.memberships SET status='active' WHERE tenant_id=%s AND identity_id=%s",
+                    (self.a,self.user))
+
+    def test_runtime_cannot_delete_membership(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.admin.transaction():
+                self.admin.execute("SET LOCAL ROLE sme_app")
+                self.admin.execute("SELECT set_config('sme.tenant_id',%s,true)",(str(self.a),))
+                self.admin.execute("DELETE FROM sme.memberships WHERE tenant_id=%s",(self.a,))
 
     def test_runtime_cannot_mutate_audit(self):
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):

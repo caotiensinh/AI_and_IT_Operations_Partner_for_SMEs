@@ -57,7 +57,9 @@ END $$;
 REVOKE ALL ON FUNCTION sme.current_tenant() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION sme.current_tenant() TO sme_app;
 -- Provisioning uses a separately audited role; no app grants on tenants/identities.
-GRANT SELECT, INSERT, UPDATE, DELETE ON sme.memberships,sme.sites,sme.assets TO sme_app;
+-- The application may inspect scoped memberships but cannot create or alter grants.
+GRANT SELECT ON sme.memberships TO sme_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON sme.sites,sme.assets TO sme_app;
 ALTER TABLE sme.memberships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sme.memberships FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_memberships ON sme.memberships;
