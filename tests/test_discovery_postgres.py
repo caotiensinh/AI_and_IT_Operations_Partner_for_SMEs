@@ -29,7 +29,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
                      "0003_session_boundary.sql", "0005_discovery_read_model.sql",
                      "0006_discovery_case_write.sql", "0007_discovery_idempotency.sql",
                      "0008_discovery_source_intake.sql",
-                     "0009_discovery_requirement_intake.sql"):
+                     "0009_discovery_requirement_intake.sql",
+                     "0010_discovery_requirement_review.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -636,3 +637,129 @@ class DiscoveryPostgresTests(unittest.TestCase):
                                 "(tenant_id,id,case_id,statement,classification) "
                                 "VALUES (%s,%s,%s,'Bypass','inferred')",
                                 (self.a,uuid4(),self.ca))
+
+    def _review(self, req_id, decision, version=0, token=None, reason="Reviewed supporting evidence"):
+        return self.client.post(
+            f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements/{req_id}/review",
+            json={"expected_version":version,"decision":decision,"rationale":reason},
+            headers={"Authorization":f"Bearer {token or self.token}"},
+        )
+
+    def _with_manager(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type,site_id) "
+                        "VALUES (%s,%s,%s,'manager','site',%s)",
+                        (self.a,uuid4(),self.ia,self.sa))
+
+    def _restore_viewer(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type) "
+                        "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_explicit_review_confirm_is_versioned_and_audited(self):
+        self._with_manager()
+        try:
+            first=self._review(self.req_id,"confirmed")
+            self.assertEqual(first.status_code,200,first.text)
+            self.assertEqual(first.json()["approval_state"],"confirmed")
+            self.assertEqual(first.json()["review_version"],1)
+            self.assertTrue(first.json()["updated"])
+            self.assertEqual(self.db.execute(
+                "SELECT approval_state,review_version FROM sme.discovery_requirements "
+                "WHERE tenant_id=%s AND id=%s",(self.a,self.req_id)).fetchone(),
+                ("confirmed",1))
+            history=self.db.execute(
+                "SELECT actor_identity_id,previous_state,next_state,review_version,rationale "
+                "FROM sme.discovery_requirement_reviews "
+                "WHERE tenant_id=%s AND requirement_id=%s",
+                (self.a,self.req_id)).fetchall()
+            self.assertEqual(history,[(self.ia,"proposed","confirmed",1,"Reviewed supporting evidence")])
+            count=self.db.execute(
+                "SELECT count(*) FROM sme.discovery_change_events "
+                "WHERE tenant_id=%s AND subject_id=%s AND action='requirement.reviewed'",
+                (self.a,self.req_id)).fetchone()[0]
+            self.assertEqual(count,1)
+            repeat=self._review(self.req_id,"confirmed",version=1)
+            self.assertEqual(repeat.status_code,200,repeat.text)
+            self.assertFalse(repeat.json()["updated"])
+            self.assertEqual(self._review(self.req_id,"confirmed",version=0).status_code,409)
+            self.assertEqual(self._review(self.req_id,"rejected",version=1).status_code,422)
+            self.assertEqual(self.db.execute(
+                "SELECT count(*) FROM sme.discovery_requirement_reviews "
+                "WHERE tenant_id=%s AND requirement_id=%s",(self.a,self.req_id)).fetchone()[0],1)
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_change_events "
+                            "WHERE tenant_id=%s AND subject_id=%s AND action='requirement.reviewed'",
+                            (self.a,self.req_id))
+            self.db.execute("DELETE FROM sme.discovery_requirement_reviews "
+                            "WHERE tenant_id=%s AND requirement_id=%s",(self.a,self.req_id))
+            self.db.execute("UPDATE sme.discovery_requirements "
+                            "SET approval_state='proposed',review_version=0 "
+                            "WHERE tenant_id=%s AND id=%s",(self.a,self.req_id))
+            self._restore_viewer()
+
+    def test_inferred_cannot_be_confirmed_but_can_be_rejected(self):
+        inferred=uuid4()
+        self.db.execute("INSERT INTO sme.discovery_requirements "
+                        "(tenant_id,id,case_id,statement,classification) "
+                        "VALUES (%s,%s,%s,'Potential savings','inferred')",
+                        (self.a,inferred,self.ca))
+        self._with_manager()
+        try:
+            self.assertEqual(self._review(inferred,"confirmed").status_code,422)
+            response=self._review(inferred,"rejected")
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual((response.json()["approval_state"],response.json()["review_version"]),
+                             ("rejected",1))
+            self.assertEqual(self.db.execute(
+                "SELECT approval_state FROM sme.discovery_requirements "
+                "WHERE tenant_id=%s AND id=%s",(self.a,inferred)).fetchone()[0],"rejected")
+            self.assertEqual(self._review(inferred,"confirmed",version=1).status_code,422)
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_change_events "
+                            "WHERE tenant_id=%s AND subject_id=%s",(self.a,inferred))
+            self.db.execute("DELETE FROM sme.discovery_requirement_reviews "
+                            "WHERE tenant_id=%s AND requirement_id=%s",(self.a,inferred))
+            self.db.execute("DELETE FROM sme.discovery_requirements "
+                            "WHERE tenant_id=%s AND id=%s",(self.a,inferred))
+            self._restore_viewer()
+
+    def test_viewer_cannot_review_and_no_history_written(self):
+        response=self._review(self.req_id,"confirmed")
+        self.assertEqual(response.status_code,403,response.text)
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM sme.discovery_requirement_reviews "
+            "WHERE tenant_id=%s AND requirement_id=%s",
+            (self.a,self.req_id)).fetchone()[0],0)
+
+    def test_review_foreign_tenant_and_invalid_payload_denied(self):
+        self._with_manager()
+        try:
+            wrong=self.client.post(
+                f"/v1/tenants/{self.b}/research-cases/{self.cb}/requirements/{self.req_id}/review",
+                json={"expected_version":0,"decision":"confirmed",
+                      "rationale":"Unauthorized cross tenant"},
+                headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(wrong.status_code,403,wrong.text)
+            self.assertEqual(self._review(uuid4(),"confirmed").status_code,403)
+            self.assertEqual(self._review(self.req_id,"confirmed",reason="short").status_code,422)
+            self.assertEqual(self._review(self.req_id,"confirmed",version=-1).status_code,422)
+            self.assertEqual(self._review(self.req_id,"invalid").status_code,422)
+        finally:
+            self._restore_viewer()
+
+    def test_app_cannot_directly_update_or_read_review_history(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("UPDATE sme.discovery_requirements "
+                                "SET approval_state='confirmed' WHERE tenant_id=%s AND id=%s",
+                                (self.a,self.req_id))
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("SELECT * FROM sme.discovery_requirement_reviews")
