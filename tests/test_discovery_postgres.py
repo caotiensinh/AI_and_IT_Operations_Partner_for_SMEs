@@ -28,7 +28,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
         for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
                      "0003_session_boundary.sql", "0005_discovery_read_model.sql",
                      "0006_discovery_case_write.sql", "0007_discovery_idempotency.sql",
-                     "0008_discovery_source_intake.sql"):
+                     "0008_discovery_source_intake.sql",
+                     "0009_discovery_requirement_intake.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -538,4 +539,100 @@ class DiscoveryPostgresTests(unittest.TestCase):
                 self.db.execute("INSERT INTO sme.discovery_sources "
                                 "(tenant_id,id,case_id,document_label,source_page) "
                                 "VALUES (%s,%s,%s,'Bypass',1)",
+                                (self.a,uuid4(),self.ca))
+
+    def test_requirement_intake_explicit_replay_conflict_and_audit(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type,site_id) "
+                        "VALUES (%s,%s,%s,'manager','site',%s)",
+                        (self.a,uuid4(),self.ia,self.sa))
+        req=uuid4()
+        endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements"
+        payload={"requirement_id":str(req),"statement":"  Need safer reporting  ",
+                 "classification":"explicit","source_id":str(self.source)}
+        headers={"Authorization":f"Bearer {self.token}"}
+        try:
+            first=self.client.post(endpoint,json=payload,headers=headers)
+            replay=self.client.post(endpoint,json=payload,headers=headers)
+            self.assertEqual((first.status_code,replay.status_code),(201,200),
+                             (first.text,replay.text))
+            self.assertEqual(first.json()["approval_state"],"proposed")
+            self.assertTrue(replay.json()["replayed"])
+            row=self.db.execute(
+                "SELECT statement,classification,approval_state,source_id "
+                "FROM sme.discovery_requirements WHERE tenant_id=%s AND id=%s",
+                (self.a,req)).fetchone()
+            self.assertEqual(row,("Need safer reporting","explicit","proposed",self.source))
+            audit=self.db.execute("SELECT actor_identity_id,action,subject_id "
+                                  "FROM sme.discovery_change_events "
+                                  "WHERE tenant_id=%s AND subject_id=%s",
+                                  (self.a,req)).fetchall()
+            self.assertEqual(audit,[(self.ia,"requirement.created",req)])
+            changed=self.client.post(endpoint,json={**payload,"statement":"Changed"},
+                                     headers=headers)
+            self.assertEqual(changed.status_code,409,changed.text)
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_change_events "
+                            "WHERE tenant_id=%s AND subject_id=%s",(self.a,req))
+            self.db.execute("DELETE FROM sme.discovery_requirements "
+                            "WHERE tenant_id=%s AND id=%s",(self.a,req))
+            self.db.execute("DELETE FROM sme.role_assignments "
+                            "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_requirement_intake_rejects_bad_evidence_and_cross_case(self):
+        endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements"
+        headers={"Authorization":f"Bearer {self.token}"}
+        base={"requirement_id":str(uuid4()),"statement":"Hypothesis",
+              "classification":"explicit"}
+        self.assertEqual(self.client.post(endpoint,json=base,headers=headers).status_code,422)
+        self.assertEqual(self.client.post(endpoint,json={
+            **base,"source_id":str(uuid4())},headers=headers).status_code,403)
+        self.assertEqual(self.client.post(endpoint,json={
+            **base,"classification":"CERTAIN","source_id":str(self.source)},
+            headers=headers).status_code,422)
+        self.assertEqual(self.client.post(endpoint,json={
+            **base,"classification":"inferred"},headers=headers).status_code,403)
+        self.assertEqual(self.client.post(endpoint,json={
+            **base,"source_id":str(self.source)},headers={}).status_code,401)
+
+    def test_requirement_intake_inferred_proposed_without_source(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type) "
+                        "VALUES (%s,%s,%s,'manager','tenant')",(self.a,uuid4(),self.ia))
+        req=uuid4()
+        endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements"
+        try:
+            result=self.client.post(endpoint,json={
+                "requirement_id":str(req),"statement":"Potential optimization",
+                "classification":"inferred"},
+                headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(result.status_code,201,result.text)
+            self.assertEqual(self.db.execute(
+                "SELECT approval_state FROM sme.discovery_requirements "
+                "WHERE tenant_id=%s AND id=%s",(self.a,req)).fetchone()[0],"proposed")
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_change_events WHERE tenant_id=%s AND subject_id=%s",
+                            (self.a,req))
+            self.db.execute("DELETE FROM sme.discovery_requirements WHERE tenant_id=%s AND id=%s",
+                            (self.a,req))
+            self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                            (self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_runtime_cannot_write_requirements_directly(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("INSERT INTO sme.discovery_requirements "
+                                "(tenant_id,id,case_id,statement,classification) "
+                                "VALUES (%s,%s,%s,'Bypass','inferred')",
                                 (self.a,uuid4(),self.ca))
