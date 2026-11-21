@@ -31,7 +31,8 @@ class AsahiPostgresE2E(unittest.TestCase):
         cls.admin = psycopg.connect(DSN, autocommit=True)
         for name in (
             "0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
-            "0003_session_boundary.sql", "0010_asahi_telemetry.sql",
+            "0003_session_boundary.sql", "0005_security_audit.sql",
+            "0010_asahi_telemetry.sql", "0011_telemetry_audit.sql",
         ):
             cls.admin.execute((ROOT / "migrations" / name).read_text())
         (cls.a, cls.b, cls.user, cls.other, cls.site_a, cls.site_b,
@@ -92,6 +93,40 @@ class AsahiPostgresE2E(unittest.TestCase):
             f"/v1/tenants/{tenant}/itops/asahi/latest",
             headers={"Authorization":f"Bearer {token}"} if token else {}
         )
+    def test_authorized_telemetry_read_creates_audit(self):
+        before = self.admin.execute(
+            "SELECT count(*) FROM sme.security_audit "
+            "WHERE tenant_id=%s AND action='telemetry.read'",(self.a,)
+        ).fetchone()[0]
+        response = self.latest(self.a,self.token)
+        self.assertEqual(response.status_code,200,response.text)
+        after = self.admin.execute(
+            "SELECT count(*) FROM sme.security_audit "
+            "WHERE tenant_id=%s AND action='telemetry.read'",(self.a,)
+        ).fetchone()[0]
+        self.assertEqual(after,before+1)
+
+    def test_denied_cross_tenant_telemetry_leaves_no_audit(self):
+        before = self.admin.execute(
+            "SELECT count(*) FROM sme.security_audit "
+            "WHERE tenant_id=%s AND action='telemetry.read'",(self.b,)
+        ).fetchone()[0]
+        self.assertEqual(self.latest(self.b,self.token).status_code,403)
+        after = self.admin.execute(
+            "SELECT count(*) FROM sme.security_audit "
+            "WHERE tenant_id=%s AND action='telemetry.read'",(self.b,)
+        ).fetchone()[0]
+        self.assertEqual(after,before)
+
+    def test_wrong_target_audit_pair_rejected(self):
+        with self.admin.transaction():
+            self.admin.execute("SET LOCAL ROLE sme_app")
+            rejected = self.admin.execute(
+                "SELECT sme.record_session_audit(%s,%s,'telemetry.read','asset',%s)",
+                (hashlib.sha256(self.token.encode()).digest(),self.a,uuid4())
+            ).fetchone()[0]
+            self.assertFalse(rejected)
+
     def test_latest_sample_only(self):
         response=self.latest(self.a,self.token)
         self.assertEqual(response.status_code,200,response.text)

@@ -136,6 +136,12 @@ def create_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                     except (PermissionDenied,TenantAccessDenied):
                         continue
                     visible.append(metric)
+                audit_ok = conn.execute(
+                    "SELECT sme.record_session_audit(%s,%s,%s,%s,%s)",
+                    (digest,tenant_id,"telemetry.read","telemetry",uuid4()),
+                ).fetchone()[0]
+                if not audit_ok:
+                    raise HTTPException(403, "audit authorization denied")
                 return asahi_latest_response(tenant_id,visible)
 
     @app.get("/v1/me/tenants")
