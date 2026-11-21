@@ -6,7 +6,7 @@ export PGPASSWORD="$SME_INGEST_DB_PASSWORD"
 db="psql -X -v ON_ERROR_STOP=1 -h db -U sme_ingest_runtime -d sme"
 login=$($db -At -c 'SELECT session_user')
 [ "$login" = sme_ingest_runtime ] || { echo "Wrong database principal"; exit 1; }
-role=$($db -At -c 'SET ROLE sme_ingest; SELECT current_user')
+role=$($db -At -c 'SET ROLE sme_ingest; SELECT current_user' | tail -n 1)
 [ "$role" = sme_ingest ] || { echo "Cannot assume ingest role"; exit 1; }
 if $db -c 'SET ROLE sme_app' >/tmp/app-role-check.log 2>&1; then
   echo "Unexpected SME application privileges"; exit 1
