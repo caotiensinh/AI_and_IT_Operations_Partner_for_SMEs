@@ -31,7 +31,7 @@ class AsahiPostgresE2E(unittest.TestCase):
         cls.admin = psycopg.connect(DSN, autocommit=True)
         for name in (
             "0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
-            "0003_session_boundary.sql", "0005_security_audit.sql",
+            "0003_session_boundary.sql", "0004_oidc_login_flow.sql", "0005_security_audit.sql",
             "0010_asahi_telemetry.sql", "0011_telemetry_audit.sql",
         ):
             cls.admin.execute((ROOT / "migrations" / name).read_text())
