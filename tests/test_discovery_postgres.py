@@ -27,7 +27,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
         cls.db = psycopg.connect(DSN, autocommit=True)
         for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
                      "0003_session_boundary.sql", "0005_discovery_read_model.sql",
-                     "0006_discovery_case_write.sql", "0007_discovery_idempotency.sql"):
+                     "0006_discovery_case_write.sql", "0007_discovery_idempotency.sql",
+                     "0008_discovery_source_intake.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -472,3 +473,69 @@ class DiscoveryPostgresTests(unittest.TestCase):
             self.db.execute("INSERT INTO sme.role_assignments "
                             "(tenant_id,id,identity_id,role,scope_type) "
                             "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_source_metadata_create_replay_conflict_and_audit(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type,site_id) "
+                        "VALUES (%s,%s,%s,'manager','site',%s)",
+                        (self.a,uuid4(),self.ia,self.sa))
+        new_source=uuid4()
+        endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/sources"
+        headers={"Authorization":f"Bearer {self.token}"}
+        data={"source_id":str(new_source),"document_label":"  Synthetic source  ","page":1}
+        try:
+            first=self.client.post(endpoint,json=data,headers=headers)
+            replay=self.client.post(endpoint,json=data,headers=headers)
+            self.assertEqual((first.status_code,replay.status_code),(201,200),
+                             (first.text,replay.text))
+            self.assertEqual(first.json()["source_id"],str(new_source))
+            self.assertFalse(first.json()["replayed"])
+            self.assertTrue(replay.json()["replayed"])
+            record=self.db.execute(
+                "SELECT document_label,source_page FROM sme.discovery_sources "
+                "WHERE tenant_id=%s AND id=%s",(self.a,new_source)).fetchone()
+            self.assertEqual(record,("Synthetic source",1))
+            audit=self.db.execute(
+                "SELECT actor_identity_id,action,subject_id "
+                "FROM sme.discovery_change_events WHERE tenant_id=%s AND subject_id=%s",
+                (self.a,new_source)).fetchall()
+            self.assertEqual(audit,[(self.ia,"source.created",new_source)])
+            conflict=self.client.post(endpoint,headers=headers,json={
+                **data,"page":2})
+            self.assertEqual(conflict.status_code,409,conflict.text)
+            self.assertEqual(self.db.execute(
+                "SELECT count(*) FROM sme.discovery_change_events "
+                "WHERE tenant_id=%s AND subject_id=%s",(self.a,new_source)).fetchone()[0],1)
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_change_events "
+                            "WHERE tenant_id=%s AND subject_id=%s",(self.a,new_source))
+            self.db.execute("DELETE FROM sme.discovery_sources "
+                            "WHERE tenant_id=%s AND id=%s",(self.a,new_source))
+            self.db.execute("DELETE FROM sme.role_assignments "
+                            "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_source_metadata_denied_viewer_and_foreign_case(self):
+        endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/sources"
+        payload={"source_id":str(uuid4()),"document_label":"Synthetic","page":1}
+        self.assertEqual(self.client.post(endpoint,json=payload,
+            headers={"Authorization":f"Bearer {self.token}"}).status_code,403)
+        self.assertEqual(self.client.post(endpoint,json=payload).status_code,401)
+        cross=f"/v1/tenants/{self.b}/research-cases/{self.cb}/sources"
+        self.assertEqual(self.client.post(cross,json=payload,
+            headers={"Authorization":f"Bearer {self.token}"}).status_code,403)
+        self.assertEqual(self.client.post(endpoint,json={**payload,"page":0},
+            headers={"Authorization":f"Bearer {self.token}"}).status_code,422)
+
+    def test_app_runtime_cannot_insert_source_or_read_audit(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("INSERT INTO sme.discovery_sources "
+                                "(tenant_id,id,case_id,document_label,source_page) "
+                                "VALUES (%s,%s,%s,'Bypass',1)",
+                                (self.a,uuid4(),self.ca))

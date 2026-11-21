@@ -20,6 +20,12 @@ from .tenant_context import AuthorizedTenantContext, TenantAccessDenied
 
 
 
+class CreateSourceMetadata(BaseModel):
+    source_id: UUID
+    document_label: str = Field(min_length=1,max_length=200)
+    page: int = Field(ge=1)
+
+
 class CreateResearchCase(BaseModel):
     site_id: UUID
     label: str = Field(min_length=1, max_length=200)
@@ -173,6 +179,31 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                 response.status_code = 200 if result[1] else 201
                 return {"tenant_id":str(tenant_id),"case_id":str(result[0]),
                         "status":"research","replayed":result[1]}
+
+
+    @app.post("/v1/tenants/{tenant_id}/research-cases/{case_id}/sources", status_code=201)
+    def create_case_source(tenant_id: UUID, case_id: UUID,
+                           request: CreateSourceMetadata, response: Response,
+                           authorization: str | None = Header(default=None)):
+        digest=_digest(authorization)
+        if not request.document_label.strip():
+            raise HTTPException(422,"source label required")
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                result=conn.execute(
+                    "SELECT result_source_id,is_replay,is_conflict "
+                    "FROM sme.create_discovery_source_once(%s,%s,%s,%s,%s,%s)",
+                    (digest,tenant_id,case_id,request.source_id,
+                     request.document_label,request.page),
+                ).fetchone()
+                if not result or result[0] is None:
+                    raise HTTPException(403,"source creation denied")
+                if result[2]:
+                    raise HTTPException(409,"source id reused for different metadata")
+                response.status_code=200 if result[1] else 201
+                return {"tenant_id":str(tenant_id),"case_id":str(case_id),
+                        "source_id":str(result[0]),"replayed":result[1]}
 
 
     return app
