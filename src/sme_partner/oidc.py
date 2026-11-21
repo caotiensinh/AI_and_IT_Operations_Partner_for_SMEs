@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 import jwt
-from jwt import InvalidTokenError
 from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import PyJWTError
 
@@ -108,10 +107,10 @@ def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = No
         if "azp" in claims and claims["azp"] != config.client_id:
             raise AuthenticationDenied("authorized party mismatch")
         amr = claims.get("amr", [])
-        amr_ok = isinstance(amr, list) and any(
-            isinstance(method, str) and method in {"mfa", "otp", "hwk", "swk", "webauthn"}
-            for method in amr
-        )
+        amr_set = set(method for method in amr if isinstance(method, str)) if isinstance(amr, list) else set()
+        # Do not treat a single OTP / hardware key alone as evidence of MFA.
+        amr_ok = "mfa" in amr_set or ("pwd" in amr_set and bool(
+            amr_set & {"otp", "hwk", "swk", "webauthn"}))
         acr_ok = (isinstance(claims.get("acr"), str)
                   and claims["acr"] in config.accepted_acr)
         has_mfa = amr_ok or acr_ok

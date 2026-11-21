@@ -84,6 +84,16 @@ class OIDCVerificationTests(unittest.TestCase):
         required=OIDCConfig('https://id.example','sme-web',{'keys':[self.jwk]},require_mfa=True,accepted_acr=frozenset({'urn:provider:strong'}))
         self.assertTrue(verify_id_token(self.sign(self.claims(amr=[],acr='urn:provider:strong')),required).mfa_satisfied)
 
+    def test_single_factor_otp_not_mfa(self):
+        required=OIDCConfig('https://id.example','sme-web',{'keys':[self.jwk]},require_mfa=True)
+        with self.assertRaises(AuthenticationDenied):
+            verify_id_token(self.sign(self.claims(amr=['otp'])),required)
+
+    def test_single_hardware_key_not_mfa(self):
+        required=OIDCConfig('https://id.example','sme-web',{'keys':[self.jwk]},require_mfa=True)
+        with self.assertRaises(AuthenticationDenied):
+            verify_id_token(self.sign(self.claims(amr=['hwk'])),required)
+
     def test_token_header_jku_denied(self):
         with self.assertRaises(AuthenticationDenied):
             verify_id_token(self.sign(headers={'kid':'key1','jku':'https://attacker.example/jwks'}),self.config)
