@@ -34,10 +34,12 @@ function App(){
   const [rationale,setRationale]=useState("");
   const [tab,setTab]=useState<"requirements"|"sources">("requirements");
   const pendingCreate=useRef<{key:string;body:string}|null>(null);
+  const pendingSource=useRef<{id:string;body:string}|null>(null);
+  const pendingRequirement=useRef<{id:string;body:string}|null>(null);
   const client=useMemo(()=>connected?new DiscoveryClient({tenantId:tenant,token}):null,[connected,tenant,token]);
 
   const resetCase=()=>{setSelected(null);setRequirements([]);setReqCursor(null);setActiveReq(null);setHistory(null);setSources([]);};
-  function disconnect(){setConnected(false);setToken("");setCases([]);setCaseCursor(null);resetCase();setNotice("");setError("");}
+  function disconnect(){setConnected(false);setToken("");setCases([]);setCaseCursor(null);resetCase();setNotice("");setError("");pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;}
   async function run(task:()=>Promise<void>){
     if(busy)return;setBusy(true);setError("");setNotice("");
     try{await task();}catch(e){setError(e instanceof Error?e.message:"処理に失敗しました。");}
@@ -67,7 +69,7 @@ function App(){
     if(!client)return;
     void run(async()=>{
       await loadRequirements(client,item.id);
-      setSelected(item);setActiveReq(null);setHistory(null);setSources([]);
+      setSelected(item);setActiveReq(null);setHistory(null);setSources([]);pendingSource.current=null;pendingRequirement.current=null;
       setTab("requirements");
     });
   }
@@ -100,10 +102,13 @@ function App(){
     if(!client||!selected||!sourceLabel.trim()||Number(sourcePage)<1||!Number.isInteger(Number(sourcePage))){
       setError("資料名と1以上のページ番号を入力してください。");return;
     }
-    const id=crypto.randomUUID();
+    const body=JSON.stringify({caseId:selected.id,label:sourceLabel.trim(),page:Number(sourcePage)});
+    if(pendingSource.current?.body!==body) pendingSource.current={id:crypto.randomUUID(),body};
+    const id=pendingSource.current.id;
     void run(async()=>{
       await client.addSource(selected.id,id,sourceLabel,Number(sourcePage));
-      setSources(prev=>[...prev,{id,label:sourceLabel.trim(),page:Number(sourcePage)}]);
+      setSources(prev=>prev.some(src=>src.id===id)?prev:[...prev,{id,label:sourceLabel.trim(),page:Number(sourcePage)}]);
+      pendingSource.current=null;
       setSourceLabel("");setSourcePage("1");setNotice("資料情報を登録しました。原本ファイルはアップロードされません。");
     });
   }
@@ -111,9 +116,12 @@ function App(){
     if(!client||!selected||!reqText.trim()||(classification==="explicit"&&!validUuid(chosenSource))){
       setError("要件と出典を確認してください。明示的な要件には出典UUIDが必須です。");return;
     }
-    const id=crypto.randomUUID();
+    const body=JSON.stringify({caseId:selected.id,statement:reqText.trim(),classification,source:chosenSource||null});
+    if(pendingRequirement.current?.body!==body) pendingRequirement.current={id:crypto.randomUUID(),body};
+    const id=pendingRequirement.current.id;
     void run(async()=>{
       await client.addRequirement(selected.id,id,reqText,classification,chosenSource||null);
+      pendingRequirement.current=null;
       await loadRequirements(client,selected.id);
       setReqText("");setClassification("unverified");setChosenSource("");
       setNotice("要件を登録しました。承認はまだ行われていません。");
