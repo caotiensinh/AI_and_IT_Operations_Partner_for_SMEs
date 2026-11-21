@@ -26,7 +26,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
     def setUpClass(cls):
         cls.db = psycopg.connect(DSN, autocommit=True)
         for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql",
-                     "0003_session_boundary.sql", "0005_discovery_read_model.sql"):
+                     "0003_session_boundary.sql", "0005_discovery_read_model.sql",
+                     "0006_discovery_case_write.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -283,3 +284,95 @@ class DiscoveryPostgresTests(unittest.TestCase):
                 r=self.client.get(endpoint,params=params,
                                   headers={"Authorization":f"Bearer {self.token}"})
                 self.assertEqual(r.status_code,422,r.text)
+
+    def post_case(self, tenant=None, site=None, token=None, label="Process assessment"):
+        return self.client.post(
+            f"/v1/tenants/{tenant or self.a}/research-cases",
+            json={"site_id":str(site or self.sa),"label":label,"company_code":"OTHER"},
+            headers={"Authorization":f"Bearer {token}"} if token else {},
+        )
+
+    def test_case_create_manager_site_permission_and_atomic_audit(self):
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute(
+            "INSERT INTO sme.role_assignments "
+            "(tenant_id,id,identity_id,role,scope_type,site_id) "
+            "VALUES (%s,%s,%s,'manager','site',%s)",
+            (self.a,uuid4(),self.ia,self.sa))
+        created=None
+        try:
+            result=self.post_case(token=self.token)
+            self.assertEqual(result.status_code,201,result.text)
+            created=result.json()["case_id"]
+            record=self.db.execute(
+                "SELECT site_id,label,status FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                (self.a,created)).fetchone()
+            self.assertEqual(record,(self.sa,"Process assessment","research"))
+            audit=self.db.execute(
+                "SELECT actor_identity_id,action FROM sme.discovery_change_events "
+                "WHERE tenant_id=%s AND case_id=%s",(self.a,created)).fetchall()
+            self.assertEqual(audit,[(self.ia,"case.created")])
+        finally:
+            if created:
+                self.db.execute("DELETE FROM sme.discovery_change_events "
+                                "WHERE tenant_id=%s AND case_id=%s",(self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                                (self.a,created))
+            self.db.execute("DELETE FROM sme.role_assignments "
+                            "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_case_create_viewer_denied_with_no_audit(self):
+        before=self.db.execute("SELECT count(*) FROM sme.discovery_change_events "
+                               "WHERE tenant_id=%s",(self.a,)).fetchone()[0]
+        self.assertEqual(self.post_case(token=self.token).status_code,403)
+        after=self.db.execute("SELECT count(*) FROM sme.discovery_change_events "
+                              "WHERE tenant_id=%s",(self.a,)).fetchone()[0]
+        self.assertEqual(before,after)
+
+    def test_case_create_missing_forged_and_wrong_tenant_denied(self):
+        forged=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        self.assertEqual(self.post_case().status_code,401)
+        self.assertEqual(self.post_case(token=forged).status_code,403)
+        self.assertEqual(self.post_case(tenant=self.b,site=self.sb,token=self.token).status_code,403)
+
+    def test_case_create_invalid_site_denied_even_if_manager(self):
+        self.db.execute("DELETE FROM sme.role_assignments "
+                        "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type) "
+                        "VALUES (%s,%s,%s,'manager','tenant')",(self.a,uuid4(),self.ia))
+        try:
+            self.assertEqual(self.post_case(site=self.sb,token=self.token).status_code,403)
+            self.assertEqual(self.post_case(site=uuid4(),token=self.token).status_code,403)
+        finally:
+            self.db.execute("DELETE FROM sme.role_assignments "
+                            "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",(self.a,uuid4(),self.ia))
+
+    def test_case_create_invalid_payload_rejected(self):
+        for label in ("", "   ", "X"*201):
+            with self.subTest(label=label[:10]):
+                self.assertEqual(self.post_case(token=self.token,label=label).status_code,422)
+        resp=self.client.post(
+            f"/v1/tenants/{self.a}/research-cases",
+            json={"site_id":str(self.sa),"label":"case","company_code":"UNKNOWN"},
+            headers={"Authorization":f"Bearer {self.token}"})
+        self.assertEqual(resp.status_code,422)
+
+    def test_direct_app_cannot_write_or_read_audit(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("SELECT * FROM sme.discovery_change_events")
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.db.transaction():
+                self.db.execute("SET LOCAL ROLE sme_app")
+                self.db.execute("INSERT INTO sme.discovery_cases "
+                                "(tenant_id,id,site_id,label,company_code) "
+                                "VALUES (%s,%s,%s,'Bypass','OTHER')",(self.a,uuid4(),self.sa))
