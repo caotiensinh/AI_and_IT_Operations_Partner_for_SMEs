@@ -28,6 +28,10 @@
 - [UI and responsive UX specification](docs/architecture/ux.md)
 - [Data architecture](docs/architecture/data.md)
 - [Initial architecture decision records](docs/adr/0001-foundation.md)
+- [Business research: four Japanese SME cases](docs/research/2026-11-chubu-sme-four-case-study.md)
+- [Business requirements traceability matrix](docs/research/requirements-traceability-matrix.md)
+- [Spec Kit 003: SME business needs and discovery](specs/003-sme-business-needs/spec.md)
+- [Spec Kit 003: implementation and research tasks](specs/003-sme-business-needs/tasks.md)
 
 ## Proposed stack
 
