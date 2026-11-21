@@ -61,6 +61,11 @@ class DiscoveryPostgresTests(unittest.TestCase):
                        "(tenant_id,id,case_id,document_label,source_page) "
                        "VALUES (%s,%s,%s,'sample brief',1)",
                        (cls.a,cls.source,cls.ca))
+        cls.req_id=uuid4()
+        cls.db.execute("INSERT INTO sme.discovery_requirements "
+                       "(tenant_id,id,case_id,source_id,statement,classification) "
+                       "VALUES (%s,%s,%s,%s,'Customer information fragmentation','explicit')",
+                       (cls.a,cls.req_id,cls.ca,cls.source))
         cls.client = TestClient(create_discovery_app(lambda: psycopg.connect(DSN)))
 
     @classmethod
@@ -141,3 +146,36 @@ class DiscoveryPostgresTests(unittest.TestCase):
                             "(tenant_id,id,case_id,statement,classification) "
                             "VALUES (%s,%s,%s,'no citation','explicit')",
                             (self.a,uuid4(),self.ca))
+
+    def test_case_requirements_source_traceable(self):
+        r=self.client.get(
+            f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements",
+            headers={"Authorization":f"Bearer {self.token}"})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(r.json()["requirements"],[{
+            "id":str(self.req_id),
+            "statement":"Customer information fragmentation",
+            "classification":"explicit",
+            "approval_state":"proposed",
+            "source":{"document_label":"sample brief","page":1}
+        }])
+
+    def test_case_requirements_wrong_tenant_denied(self):
+        r=self.client.get(
+            f"/v1/tenants/{self.b}/research-cases/{self.cb}/requirements",
+            headers={"Authorization":f"Bearer {self.token}"})
+        self.assertEqual(r.status_code,403,r.text)
+
+    def test_case_requirements_revoked_role_denied(self):
+        self.db.execute("DELETE FROM sme.role_assignments "
+                        "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+        try:
+            r=self.client.get(
+                f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements",
+                headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(r.status_code,404,r.text)
+        finally:
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",
+                            (self.a,uuid4(),self.ia))
