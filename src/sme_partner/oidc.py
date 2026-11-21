@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import jwt
+import hmac
 from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import PyJWTError
 
@@ -49,7 +50,7 @@ class VerifiedOIDCSubject:
     mfa_satisfied: bool
 
 
-def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = None) -> VerifiedOIDCSubject:
+def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = None, expected_nonce: str | None = None) -> VerifiedOIDCSubject:
     """Verify RS256 signatures and OIDC claims against *trusted pinned* JWKS.
 
     The JWKS must be fetched/refreshed from a pinned provider configuration by
@@ -85,6 +86,10 @@ def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = No
             # Current time is controlled by PyJWT internally; explicit temporal
             # checks below allow deterministic boundary tests and future clocks.
         )
+        if expected_nonce is not None:
+            nonce = claims.get("nonce")
+            if not isinstance(nonce, str) or not hmac.compare_digest(nonce, expected_nonce):
+                raise AuthenticationDenied("invalid login nonce")
         sub = claims["sub"]
         issued_at = claims["iat"]
         expires_at = claims["exp"]
