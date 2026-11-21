@@ -59,7 +59,7 @@ def normalize_asahi_snapshot(
     binding must be resolved and authorized before it is invoked.
     """
     if not isinstance(binding, DeviceBinding) or not all(
-        isinstance(v, UUID) for v in (binding.tenant_id,binding.site_id,binding.device_id)
+        isinstance(v, UUID) and v.int != 0 for v in (binding.tenant_id,binding.site_id,binding.device_id)
     ):
         raise MetricRejected("invalid device binding")
     if not isinstance(payload, dict):
@@ -70,7 +70,10 @@ def normalize_asahi_snapshot(
     raw_time=payload.get("timestamp",payload.get("time"))
     if type(raw_time) is not int or not 0 < raw_time < 2**42:
         raise MetricRejected("missing or invalid timestamp")
-    sampled_at=datetime.fromtimestamp(raw_time,tz=timezone.utc)
+    try:
+        sampled_at=datetime.fromtimestamp(raw_time,tz=timezone.utc)
+    except (OverflowError,ValueError,OSError):
+        raise MetricRejected("invalid timestamp range") from None
     if maximum_clock_skew_seconds < 0 or abs((observed_at-sampled_at).total_seconds()) > maximum_clock_skew_seconds:
         raise MetricRejected("stale or future telemetry")
     hostname=payload.get("hostname")

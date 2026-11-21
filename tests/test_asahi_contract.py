@@ -65,5 +65,12 @@ class AsahiContractTests(unittest.TestCase):
         m=self.normalize(p)
         self.assertIsNone(m.cpu_percent)
         self.assertIsNone(m.memory_percent)
+    def test_oversized_timestamp_rejected_consistently(self):
+        p=dict(self.payload);p["timestamp"]=2**41
+        with self.assertRaises(MetricRejected):self.normalize(p)
+    def test_nil_device_binding_denied(self):
+        from uuid import UUID
+        with self.assertRaises(MetricRejected):
+            self.normalize(binding=DeviceBinding(self.bound.tenant_id,self.bound.site_id,UUID(int=0)))
     def test_timezone_required(self):
         with self.assertRaises(MetricRejected):self.normalize(observed=datetime.now())
