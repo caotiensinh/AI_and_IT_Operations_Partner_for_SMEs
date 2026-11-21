@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 from fastapi import FastAPI, Header, HTTPException, Response
@@ -71,6 +71,12 @@ def create_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                     except (PermissionDenied, TenantAccessDenied):
                         continue
                     items.append({"id": str(asset_id), "site_id": str(site_id), "name": name})
+                audit_ok = conn.execute(
+                    "SELECT sme.record_session_audit(%s,%s,%s,%s,%s)",
+                    (digest,tenant_id,"asset.list","asset",uuid4()),
+                ).fetchone()[0]
+                if not audit_ok:
+                    raise HTTPException(403, "audit authorization denied")
                 return {"tenant_id": str(tenant_id), "assets": items}
 
     @app.post("/v1/session/logout", status_code=204)
