@@ -1,0 +1,19 @@
+# Build contexts must never ship runtime secrets or working-tree metadata.
+.git
+.gitignore
+.env
+.env.*
+!.env.staging.example
+**/.env
+**/.env.*
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/dist
+**/*.pyc
+*.dump
+*.log
+playwright-report
+test-results
+/tmp
