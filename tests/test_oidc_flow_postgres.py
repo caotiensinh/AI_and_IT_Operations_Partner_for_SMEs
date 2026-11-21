@@ -43,7 +43,7 @@ class OIDCFlowPostgresTests(unittest.TestCase):
  def test_auth_issues_only_known_active_identity(self):
   digest=hashlib.sha256(secrets.token_bytes(32)).digest()
   self.assertEqual(self.as_role('sme_auth',"SELECT sme.issue_oidc_session(%s,%s,%s,%s)",(self.issuer,self.subject,digest,3600)),[(True,)])
-  self.assertEqual(self.as_role('sme_auth',"SELECT sme.resolve_session(%s,%s)",(digest,self.tenant)),[(self.user,)])
+  self.assertEqual(self.as_role('sme_app',"SELECT sme.resolve_session(%s,%s)",(digest,self.tenant)),[(self.user,)])
   self.assertEqual(self.as_role('sme_auth',"SELECT sme.issue_oidc_session(%s,%s,%s,%s)",(self.issuer,'unknown',b'1'*32,3600)),[(False,)])
  def test_auth_role_cannot_read_raw_session(self):
   with self.assertRaises(psycopg.errors.InsufficientPrivilege):
