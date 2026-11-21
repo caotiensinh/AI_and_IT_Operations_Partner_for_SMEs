@@ -6,7 +6,7 @@ on:
       - 'src/**'
       - 'migrations/**'
       - 'scripts/**'
-      - 'tests/browser_e2e.mjs'
+      - 'frontend/tests/browser_e2e.mjs'
       - '.github/workflows/live-browser-e2e.yml'
   pull_request:
     paths:
@@ -14,7 +14,7 @@ on:
       - 'src/**'
       - 'migrations/**'
       - 'scripts/**'
-      - 'tests/browser_e2e.mjs'
+      - 'frontend/tests/browser_e2e.mjs'
       - '.github/workflows/live-browser-e2e.yml'
 permissions:
   contents: read
@@ -70,6 +70,7 @@ jobs:
           exit 1
       - name: Browser cross-tenant tests
         run: node tests/browser_e2e.mjs
+        working-directory: frontend
       - name: Diagnostics on failure
         if: failure()
         run: tail -100 /tmp/sme-api.log /tmp/sme-ui.log || true
