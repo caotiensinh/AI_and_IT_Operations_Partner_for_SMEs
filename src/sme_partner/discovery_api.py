@@ -20,6 +20,12 @@ from .tenant_context import AuthorizedTenantContext, TenantAccessDenied
 
 
 
+class ReviewRequirement(BaseModel):
+    expected_version: int = Field(ge=0)
+    decision: Literal["confirmed","rejected"]
+    rationale: str = Field(min_length=8,max_length=2000)
+
+
 class CreateRequirement(BaseModel):
     requirement_id: UUID
     statement: str = Field(min_length=1,max_length=4000)
@@ -238,6 +244,39 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                 return {"tenant_id":str(tenant_id),"case_id":str(case_id),
                         "requirement_id":str(result[0]),"approval_state":"proposed",
                         "replayed":result[1]}
+
+
+    @app.post("/v1/tenants/{tenant_id}/research-cases/{case_id}/requirements/{requirement_id}/review")
+    def review_case_requirement(tenant_id: UUID,case_id: UUID,requirement_id: UUID,
+                                request: ReviewRequirement,
+                                authorization: str | None = Header(default=None)):
+        digest=_digest(authorization)
+        if not request.rationale.strip() or len(request.rationale.strip())<8:
+            raise HTTPException(422,"review rationale must contain at least 8 characters")
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                result=conn.execute(
+                    "SELECT result_status,result_version,result_state "
+                    "FROM sme.review_discovery_requirement(%s,%s,%s,%s,%s,%s,%s)",
+                    (digest,tenant_id,case_id,requirement_id,
+                     request.expected_version,request.decision,request.rationale),
+                ).fetchone()
+                if not result:
+                    raise HTTPException(403,"review denied")
+                status,version,state=result
+                if status=="denied":
+                    raise HTTPException(403,"review denied")
+                if status=="conflict":
+                    raise HTTPException(409,"review version mismatch")
+                if status=="invalid":
+                    raise HTTPException(422,"invalid review transition or evidence")
+                if status not in ("updated","unchanged"):
+                    raise HTTPException(500,"unexpected review status")
+                return {"tenant_id":str(tenant_id),"case_id":str(case_id),
+                        "requirement_id":str(requirement_id),
+                        "approval_state":state,"review_version":version,
+                        "updated":status=="updated"}
 
 
     return app
