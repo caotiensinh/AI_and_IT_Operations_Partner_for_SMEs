@@ -1,0 +1,56 @@
+# Isolated staging baseline: loopback-only HTTP. Do not expose to customers.
+name: sme-staging
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sme
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SME_DB_ADMIN_PASSWORD:?set in --env-file .env.staging}
+    volumes:
+      - sme_pg_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sme"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [private]
+  migrate:
+    image: postgres:16-alpine
+    environment:
+      SME_DB_ADMIN_PASSWORD: ${SME_DB_ADMIN_PASSWORD:?missing}
+      SME_RUNTIME_DB_PASSWORD: ${SME_RUNTIME_DB_PASSWORD:?missing}
+    volumes:
+      - ./migrations:/migrations:ro
+      - ./deploy/staging:/deploy:ro
+    entrypoint: ["/bin/sh", "/deploy/migrate.sh"]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+    networks: [private]
+  api:
+    build:
+      context: .
+      dockerfile: deploy/staging/Dockerfile.api
+    environment:
+      SME_RUNTIME_DATABASE_DSN: "postgresql://sme_runtime:${SME_RUNTIME_DB_PASSWORD:?missing}@db:5432/sme"
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    tmpfs: [/tmp]
+    networks: [private]
+  web:
+    build:
+      context: .
+      dockerfile: deploy/staging/Dockerfile.ui
+    depends_on: [api]
+    ports:
+      - "127.0.0.1:${SME_HTTP_PORT:-18080}:80"
+    security_opt: ["no-new-privileges:true"]
+    networks: [private]
+networks:
+  private: {}
+volumes:
+  sme_pg_staging: {}
