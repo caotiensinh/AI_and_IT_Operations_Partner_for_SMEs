@@ -10,7 +10,7 @@ from collections.abc import Callable
 from uuid import UUID
 
 import psycopg
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from typing import Literal
 
@@ -146,8 +146,14 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
 
     @app.post("/v1/tenants/{tenant_id}/research-cases", status_code=201)
     def create_research_case(tenant_id: UUID, request: CreateResearchCase,
+                             response: Response,
+                             idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
                              authorization: str | None = Header(default=None)):
         digest = _digest(authorization)
+        if (not idempotency_key or len(idempotency_key) not in range(16,129)
+                or not all(c.isascii() and (c.isalnum() or c in "_-")
+                           for c in idempotency_key)):
+            raise HTTPException(422, "Idempotency-Key must be 16-128 ASCII URL-safe characters")
         if not request.label.strip():
             raise HTTPException(422, "nonempty case label required")
         with connect() as conn:
@@ -155,13 +161,18 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                 # sme_app has NO direct INSERT on research tables or audit events.
                 conn.execute("SET LOCAL ROLE sme_app")
                 result = conn.execute(
-                    "SELECT sme.create_discovery_case(%s,%s,%s,%s,%s)",
-                    (digest,tenant_id,request.site_id,request.label,request.company_code),
+                    "SELECT result_case_id,is_replay,is_conflict "
+                    "FROM sme.create_discovery_case_once(%s,%s,%s,%s,%s,%s)",
+                    (digest,tenant_id,request.site_id,request.label,
+                     request.company_code,idempotency_key),
                 ).fetchone()
                 if not result or result[0] is None:
                     raise HTTPException(403, "case creation denied")
+                if result[2]:
+                    raise HTTPException(409, "idempotency key reused with different payload")
+                response.status_code = 200 if result[1] else 201
                 return {"tenant_id":str(tenant_id),"case_id":str(result[0]),
-                        "status":"research"}
+                        "status":"research","replayed":result[1]}
 
 
     return app
