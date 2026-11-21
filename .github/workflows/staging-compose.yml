@@ -34,7 +34,7 @@ jobs:
           from pathlib import Path
           import secrets
           p=Path('.env.staging')
-          p.write_text('SME_DB_ADMIN_PASSWORD='+secrets.token_hex(32)+'\nSME_RUNTIME_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_HTTP_PORT=18080\n')
+          p.write_text('SME_DB_ADMIN_PASSWORD='+secrets.token_hex(32)+'\nSME_RUNTIME_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_INGEST_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_HTTP_PORT=18080\n')
           p.chmod(0o600)
           PY
       - name: Validate Compose definition
@@ -56,6 +56,20 @@ jobs:
           docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
             psql -v ON_ERROR_STOP=1 -U postgres -d sme -c "SET ROLE sme_runtime; UPDATE sme.memberships SET status='active';" > /tmp/membership-probe.log 2>&1 && exit 1 || true
           grep -q 'permission denied' /tmp/membership-probe.log
+      - name: Verify separated ingest login permissions
+        run: |
+          docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
+            psql -At -v ON_ERROR_STOP=1 -U postgres -d sme -c "SELECT pg_has_role('sme_ingest_runtime','sme_ingest','member') AND NOT pg_has_role('sme_ingest_runtime','sme_app','member') AND NOT pg_has_role('sme_ingest_runtime','sme_auth','member')" | grep -qx t
+          if docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
+            psql -v ON_ERROR_STOP=1 -U postgres -d sme -c "SET ROLE sme_ingest_runtime; SELECT credential_digest FROM sme.asahi_enrollments;" > /tmp/ingest-probe.log 2>&1; then
+            echo "Unexpected enrollment table read"; exit 1
+          fi
+          grep -q 'permission denied' /tmp/ingest-probe.log
+          if docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
+            psql -v ON_ERROR_STOP=1 -U postgres -d sme -c "SET ROLE sme_ingest_runtime; INSERT INTO sme.asahi_samples(tenant_id,device_id,site_id,sampled_at,hostname) VALUES ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001',now(),'forged');" > /tmp/ingest-write-probe.log 2>&1; then
+            echo "Unexpected direct ingestion"; exit 1
+          fi
+          grep -q 'permission denied' /tmp/ingest-write-probe.log
       - name: PostgreSQL backup and restore drill
         env:
           SME_E2E_FIXTURE_MODE: disposable_ci_only
