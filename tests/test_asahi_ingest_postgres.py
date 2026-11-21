@@ -88,7 +88,7 @@ class AsahiTrustedIngestTests(unittest.TestCase):
             self.db.execute(
                 "INSERT INTO sme.asahi_enrollments(id,tenant_id,site_id,device_id,credential_digest) "
                 "VALUES (%s,%s,%s,%s,%s)",
-                (uuid4(),self.a,self.site_b,self.device_a,b'1'*32))
+                (uuid4(),self.a,self.site_b,self.device_b,b'1'*32))
     def test_ingest_role_cannot_read_credentials(self):
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
             with self.db.transaction():
