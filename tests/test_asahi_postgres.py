@@ -68,10 +68,10 @@ class AsahiPostgresE2E(unittest.TestCase):
             (cls.user,cls.token,None),(cls.other,cls.other_token,None),
             (cls.user,cls.revoked_token,cls.now)):
             cls.admin.execute(
-                "INSERT INTO sme.sessions(id,identity_id,token_digest,expires_at,revoked_at) "
-                "VALUES (%s,%s,%s,%s,%s)",
+                "INSERT INTO sme.sessions(id,identity_id,token_digest,created_at,expires_at,revoked_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
                 (uuid4(),who,hashlib.sha256(token.encode()).digest(),
-                 cls.now+timedelta(hours=1),revoked))
+                 cls.now-timedelta(hours=2),cls.now+timedelta(hours=1),revoked))
         for tenant,device,site,name,cpu,stamp in (
             (cls.a,cls.asset_a,cls.site_a,"aichi-node",25,cls.now-timedelta(minutes=1)),
             (cls.a,cls.asset_a,cls.site_a,"aichi-node",52,cls.now),
