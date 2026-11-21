@@ -231,7 +231,7 @@ function App(){
                 <option value="">出典なし</option>
                 {sources.map(source=><option key={source.id} value={source.id}>{source.document_label} · p.{source.page}</option>)}
               </select></label>
-              {sourceCursor&&<button type="button" className="more" disabled={busy} onClick={()=>client&&void run(()=>loadSources(client,selected.id,sourceCursor))}>出典をさらに読み込む</button>
+              {sourceCursor&&<button type="button" className="more" disabled={busy} onClick={()=>client&&void run(()=>loadSources(client,selected.id,sourceCursor))}>出典をさらに読み込む</button>}
               <button className="primary" type="submit" disabled={busy}>要件を登録</button>
             </form></section>
             <aside className="detail panel">
