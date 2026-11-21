@@ -1,0 +1,1 @@
+# AI_and_IT_Operations_Partner_for_SMEs
