@@ -70,6 +70,11 @@ jobs:
             echo "Unexpected direct ingestion"; exit 1
           fi
           grep -q 'permission denied' /tmp/ingest-write-probe.log
+      - name: Verify real ingest password login and role isolation
+        run: |
+          docker compose --env-file .env.staging -f compose.staging.yml \
+            run --rm --no-deps --entrypoint /bin/sh migrate \
+            /deploy/check_ingest_login.sh
       - name: PostgreSQL backup and restore drill
         env:
           SME_E2E_FIXTURE_MODE: disposable_ci_only
