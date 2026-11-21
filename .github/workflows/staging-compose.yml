@@ -1,0 +1,66 @@
+name: Staging Compose smoke
+on:
+  push:
+    paths:
+      - 'compose.staging.yml'
+      - 'deploy/staging/**'
+      - 'scripts/staging_smoke.sh'
+      - '.github/workflows/staging-compose.yml'
+      - 'src/**'
+      - 'migrations/**'
+      - 'frontend/**'
+  pull_request:
+    paths:
+      - 'compose.staging.yml'
+      - 'deploy/staging/**'
+      - 'scripts/staging_smoke.sh'
+      - '.github/workflows/staging-compose.yml'
+      - 'src/**'
+      - 'migrations/**'
+      - 'frontend/**'
+permissions:
+  contents: read
+jobs:
+  compose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create disposable secrets
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import secrets
+          p=Path('.env.staging')
+          p.write_text('SME_DB_ADMIN_PASSWORD='+secrets.token_hex(32)+'\nSME_RUNTIME_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_HTTP_PORT=18080\n')
+          p.chmod(0o600)
+          PY
+      - name: Validate Compose definition
+        run: docker compose --env-file .env.staging -f compose.staging.yml config --quiet
+      - name: Build and start
+        run: docker compose --env-file .env.staging -f compose.staging.yml up -d --build
+      - name: Verify runtime and deny-by-default access
+        run: |
+          for i in $(seq 1 45); do
+            if [ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/v1/me/tenants || true)" = 401 ]; then break; fi
+            sleep 2
+          done
+          sh scripts/staging_smoke.sh
+      - name: Verify runtime role cannot read session or modify memberships
+        run: |
+          docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
+            psql -v ON_ERROR_STOP=1 -U postgres -d sme -c "SET ROLE sme_runtime; SELECT count(*) FROM sme.sessions;" > /tmp/role-probe.log 2>&1 && exit 1 || true
+          grep -q 'permission denied' /tmp/role-probe.log
+          docker compose --env-file .env.staging -f compose.staging.yml exec -T db \
+            psql -v ON_ERROR_STOP=1 -U postgres -d sme -c "SET ROLE sme_runtime; UPDATE sme.memberships SET status='active';" > /tmp/membership-probe.log 2>&1 && exit 1 || true
+          grep -q 'permission denied' /tmp/membership-probe.log
+      - name: PostgreSQL backup and restore drill
+        env:
+          SME_E2E_FIXTURE_MODE: disposable_ci_only
+        run: sh scripts/staging_restore_drill.sh
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --env-file .env.staging -f compose.staging.yml logs --no-color --tail=70 || true
+      - name: Cleanup
+        if: always()
+        run: docker compose --env-file .env.staging -f compose.staging.yml down -v --remove-orphans || true
