@@ -42,7 +42,7 @@ jobs:
       - name: Verify runtime and deny-by-default access
         run: |
           for i in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:18080/ >/dev/null; then break; fi
+            if [ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/v1/me/tenants || true)" = 401 ]; then break; fi
             sleep 2
           done
           sh scripts/staging_smoke.sh
