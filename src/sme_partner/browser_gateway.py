@@ -32,6 +32,7 @@ def install_browser_gateway(
     public_origin: str,
     csrf_key: bytes,
     revoke_session: Callable[[str], None],
+    session_active: Callable[[str], bool],
 ) -> None:
     """Install browser routes; no login, default key or secrets are auto-created."""
     parts = urlsplit(public_origin)
@@ -74,7 +75,7 @@ def install_browser_gateway(
     @app.get("/auth/csrf")
     def browser_csrf(request: Request):
         session = request.cookies.get(SESSION_COOKIE)
-        if not session or len(session) != 43:
+        if not session or len(session) != 43 or not session_active(session):
             raise HTTPException(401, "authentication required")
         response = JSONResponse({"csrf_token": _session_csrf(session, csrf_key)})
         response.headers["Cache-Control"] = "no-store"
@@ -84,7 +85,7 @@ def install_browser_gateway(
     def browser_logout(request: Request, origin_header: str | None = Header(None, alias="Origin"),
                        csrf_header: str | None = Header(None, alias=CSRF_HEADER)):
         session = request.cookies.get(SESSION_COOKIE)
-        if origin_header != origin or not session or len(session) != 43:
+        if origin_header != origin or not session or len(session) != 43 or not session_active(session):
             raise HTTPException(403, "request denied")
         expected = _session_csrf(session, csrf_key)
         if not isinstance(csrf_header, str) or not hmac.compare_digest(csrf_header, expected):

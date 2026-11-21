@@ -31,9 +31,11 @@ class BrowserGatewayTests(unittest.TestCase):
     def setUp(self):
         self.flow=FakeFlow()
         self.revoked=[]
+        self.active_tokens={'c'*43}
         self.app=FastAPI()
         install_browser_gateway(self.app,self.flow,public_origin="https://app.example",
-                                csrf_key=b"k"*32,revoke_session=self.revoked.append)
+                                csrf_key=b"k"*32,revoke_session=self.revoked.append,
+                                session_active=lambda token: token in self.active_tokens and token not in self.revoked)
         self.client=TestClient(self.app,base_url="https://app.example",follow_redirects=False)
     def test_start_sets_secure_binding_cookie(self):
         r=self.client.get("/auth/start")
@@ -68,6 +70,22 @@ class BrowserGatewayTests(unittest.TestCase):
             "X-CSRF-Token":csrf.json()["csrf_token"]})
         self.assertEqual(r.status_code,204)
         self.assertEqual(self.revoked,["c"*43])
+    def test_revoked_session_cannot_get_csrf(self):
+        self.client.get("/auth/start")
+        self.client.get("/auth/callback",params={"state":"a"*43,"code":"approved-code-value"})
+        self.active_tokens.clear()
+        self.assertEqual(self.client.get("/auth/csrf").status_code,401)
+
+    def test_inactive_session_cannot_logout(self):
+        self.client.get("/auth/start")
+        self.client.get("/auth/callback",params={"state":"a"*43,"code":"approved-code-value"})
+        csrf=self.client.get("/auth/csrf").json()["csrf_token"]
+        self.active_tokens.clear()
+        response=self.client.post("/auth/logout",
+            headers={"Origin":"https://app.example","X-CSRF-Token":csrf})
+        self.assertEqual(response.status_code,403)
+        self.assertEqual(self.revoked,[])
+
     def test_logout_rejects_forged_csrf(self):
         self.client.get("/auth/start")
         self.client.get("/auth/callback",params={"state":"a"*43,"code":"approved-code-value"})
@@ -84,10 +102,12 @@ class BrowserGatewayTests(unittest.TestCase):
     def test_rejects_insecure_origin_or_short_key(self):
         with self.assertRaises(ValueError):
             install_browser_gateway(FastAPI(),self.flow,public_origin="http://localhost",
-                                    csrf_key=b"k"*32,revoke_session=self.revoked.append)
+                                    csrf_key=b"k"*32,revoke_session=self.revoked.append,
+                                    session_active=lambda token: True)
         with self.assertRaises(ValueError):
             install_browser_gateway(FastAPI(),self.flow,public_origin="https://app.example",
-                                    csrf_key=b"short",revoke_session=self.revoked.append)
+                                    csrf_key=b"short",revoke_session=self.revoked.append,
+                                    session_active=lambda token: True)
 
 
 class ExchangeTests(unittest.TestCase):

@@ -29,7 +29,7 @@ class SessionApiE2ETests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.admin = psycopg.connect(DSN, autocommit=True)
-        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql", "0006_tenant_selector.sql", "0007_membership_least_privilege.sql"):
+        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql", "0006_tenant_selector.sql", "0007_membership_least_privilege.sql", "0009_session_active.sql"):
             cls.admin.execute((ROOT / "migrations" / name).read_text())
         cls.a,cls.b,cls.user,cls.other,cls.site_a,cls.site_b,cls.asset_a,cls.asset_b = (uuid4() for _ in range(8))
         cls.token = _token()
@@ -204,6 +204,24 @@ class SessionApiE2ETests(unittest.TestCase):
             with self.admin.transaction():
                 self.admin.execute("SET LOCAL ROLE sme_app")
                 self.admin.execute("DELETE FROM sme.security_audit")
+
+    def test_csrf_session_validation_respects_revocation(self):
+        digest=hashlib.sha256(self.token.encode("ascii")).digest()
+        forged=hashlib.sha256(_token().encode("ascii")).digest()
+        with self.admin.transaction():
+            self.admin.execute("SET LOCAL ROLE sme_app")
+            self.assertTrue(self.admin.execute(
+                "SELECT sme.session_is_active(%s)",(digest,)).fetchone()[0])
+            self.assertFalse(self.admin.execute(
+                "SELECT sme.session_is_active(%s)",(forged,)).fetchone()[0])
+        self.admin.execute("UPDATE sme.sessions SET revoked_at=now() WHERE token_digest=%s",(digest,))
+        try:
+            with self.admin.transaction():
+                self.admin.execute("SET LOCAL ROLE sme_app")
+                self.assertFalse(self.admin.execute(
+                    "SELECT sme.session_is_active(%s)",(digest,)).fetchone()[0])
+        finally:
+            self.admin.execute("UPDATE sme.sessions SET revoked_at=NULL WHERE token_digest=%s",(digest,))
 
     def test_runtime_cannot_read_session_table(self):
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
