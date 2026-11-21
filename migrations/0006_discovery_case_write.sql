@@ -13,14 +13,14 @@ GRANT SELECT ON sme.role_assignments,sme.sites TO sme_discovery_service;
 GRANT INSERT ON sme.discovery_cases TO sme_discovery_service;
 -- Discoverable tenant context is set only after the DB verifies bearer digest.
 DROP POLICY IF EXISTS discovery_writer_roles ON sme.role_assignments;
-CREATE POLICY discovery_writer_roles ON sme.role_assignments TO sme_discovery_service
- FOR SELECT USING (tenant_id=sme.current_tenant());
+CREATE POLICY discovery_writer_roles ON sme.role_assignments FOR SELECT TO sme_discovery_service
+ USING (tenant_id=sme.current_tenant());
 DROP POLICY IF EXISTS discovery_writer_sites ON sme.sites;
-CREATE POLICY discovery_writer_sites ON sme.sites TO sme_discovery_service
- FOR SELECT USING (tenant_id=sme.current_tenant());
+CREATE POLICY discovery_writer_sites ON sme.sites FOR SELECT TO sme_discovery_service
+ USING (tenant_id=sme.current_tenant());
 DROP POLICY IF EXISTS discovery_writer_create ON sme.discovery_cases;
-CREATE POLICY discovery_writer_create ON sme.discovery_cases TO sme_discovery_service
- FOR INSERT WITH CHECK (tenant_id=sme.current_tenant());
+CREATE POLICY discovery_writer_create ON sme.discovery_cases FOR INSERT TO sme_discovery_service
+ WITH CHECK (tenant_id=sme.current_tenant());
 
 CREATE TABLE IF NOT EXISTS sme.discovery_change_events (
  tenant_id uuid NOT NULL,
@@ -39,7 +39,7 @@ REVOKE ALL ON sme.discovery_change_events FROM PUBLIC,sme_app;
 GRANT INSERT ON sme.discovery_change_events TO sme_discovery_service;
 DROP POLICY IF EXISTS discovery_events_insert ON sme.discovery_change_events;
 CREATE POLICY discovery_events_insert ON sme.discovery_change_events
- TO sme_discovery_service FOR INSERT
+ FOR INSERT TO sme_discovery_service
  WITH CHECK (tenant_id=sme.current_tenant());
 
 -- Runtime can EXECUTE, but never SELECT membership tables or INSERT records directly.
