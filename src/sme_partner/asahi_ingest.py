@@ -39,7 +39,7 @@ def ingest_one(poller: AsahiHTTPSPoller, connect: Callable, auth: IngestAuthoriz
             # CI principal allowed to assume sme_ingest; never the web runtime.
             conn.execute("SET LOCAL ROLE sme_ingest")
             return bool(conn.execute(
-                "SELECT sme.ingest_asahi_sample(%s,%s,%s,%s,%s,%s,%s)",
+                "SELECT sme.ingest_asahi_sample(%s,%s,%s,%s,%s::numeric,%s::numeric,%s::bigint)",
                 (auth.enrollment_id,credential_digest,sample.sampled_at,
                  sample.hostname,sample.cpu_percent,sample.memory_percent,
                  sample.uptime_seconds),

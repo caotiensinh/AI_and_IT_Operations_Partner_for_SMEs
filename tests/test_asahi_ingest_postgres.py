@@ -53,7 +53,7 @@ class AsahiTrustedIngestTests(unittest.TestCase):
         with self.db.transaction():
             self.db.execute("SET LOCAL ROLE sme_ingest")
             return self.db.execute(
-                "SELECT sme.ingest_asahi_sample(%s,%s,%s,%s,%s,%s,%s)",
+                "SELECT sme.ingest_asahi_sample(%s,%s,%s,%s,%s::numeric,%s::numeric,%s::bigint)",
                 (eid,hashlib.sha256(token.encode()).digest(),stamp or self.now,
                  'test-node',43.5,61.0,100),
             ).fetchone()[0]
@@ -106,7 +106,7 @@ class AsahiTrustedIngestTests(unittest.TestCase):
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
             with self.db.transaction():
                 self.db.execute("SET LOCAL ROLE sme_app")
-                self.db.execute("SELECT sme.ingest_asahi_sample(%s,%s,%s,'x',20,30,20)",
+                self.db.execute("SELECT sme.ingest_asahi_sample(%s,%s,%s,'x',20::numeric,30::numeric,20::bigint)",
                                 (self.enroll_a,hashlib.sha256(self.token_a.encode()).digest(),self.now))
     def test_duplicate_device_enrollment_denied(self):
         with self.assertRaises(psycopg.errors.UniqueViolation):
