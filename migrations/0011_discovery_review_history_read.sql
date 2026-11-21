@@ -8,7 +8,7 @@ CREATE POLICY discovery_review_reader ON sme.discovery_requirement_reviews
 CREATE OR REPLACE FUNCTION sme.get_discovery_requirement_review_history(
  p_digest bytea,p_tenant uuid,p_case uuid,p_requirement uuid
 ) RETURNS jsonb
-LANGUAGE plpgsql STABLE SECURITY DEFINER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,sme
 AS $$
 DECLARE
