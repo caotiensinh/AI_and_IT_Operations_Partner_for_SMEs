@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import psycopg
 from fastapi import FastAPI, Header, HTTPException, Response, Request
 
+from .asahi_read import asahi_latest_response
 from .rbac import Action, Assignment, PermissionDenied, Resource, Role, ScopeType, require_permission
 from .tenant_context import AuthorizedTenantContext, TenantAccessDenied
 
@@ -87,6 +88,55 @@ def create_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                 if not audit_ok:
                     raise HTTPException(403, "audit authorization denied")
                 return {"tenant_id": str(tenant_id), "assets": items}
+
+    @app.get("/v1/tenants/{tenant_id}/itops/asahi/latest")
+    def latest_asahi(tenant_id: UUID, request: Request, authorization: str | None = Header(default=None)):
+        digest = _request_digest(authorization, request)
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                row = conn.execute(
+                    "SELECT sme.resolve_session(%s,%s)", (digest,tenant_id)
+                ).fetchone()
+                if not row or row[0] is None:
+                    raise HTTPException(403, "tenant access denied")
+                identity_id = row[0]
+                conn.execute("SELECT set_config('sme.tenant_id',%s,true)", (str(tenant_id),))
+                grants = conn.execute(
+                    "SELECT role,scope_type,site_id,department_id FROM sme.role_assignments "
+                    "WHERE tenant_id=%s AND identity_id=%s", (tenant_id,identity_id)
+                ).fetchall()
+                assignments = tuple(
+                    Assignment(tenant_id,identity_id,Role(role),ScopeType(scope_type),
+                               site_id if scope_type == "site" else
+                               department_id if scope_type == "department" else None)
+                    for role,scope_type,site_id,department_id in grants
+                )
+                # DISTINCT ON returns the latest sample for each trusted asset.
+                # Read RLS applies to samples and assets, then RBAC filters sites.
+                rows = conn.execute(
+                    "SELECT s.device_id,s.site_id,s.hostname,s.cpu_percent,"
+                    "s.memory_percent,s.uptime_seconds,s.sampled_at "
+                    "FROM (SELECT DISTINCT ON (tenant_id,device_id) "
+                    "tenant_id,device_id,site_id,hostname,cpu_percent,memory_percent,"
+                    "uptime_seconds,sampled_at FROM sme.asahi_samples "
+                    "WHERE tenant_id=%s ORDER BY tenant_id,device_id,sampled_at DESC) s "
+                    "JOIN sme.assets a ON a.tenant_id=s.tenant_id AND "
+                    "a.id=s.device_id AND a.site_id=s.site_id "
+                    "ORDER BY s.hostname,s.device_id", (tenant_id,)
+                ).fetchall()
+                context = AuthorizedTenantContext(identity_id,tenant_id)
+                visible = []
+                for metric in rows:
+                    try:
+                        require_permission(
+                            context,assignments,Action.READ,
+                            Resource(tenant_id,metric[1])
+                        )
+                    except (PermissionDenied,TenantAccessDenied):
+                        continue
+                    visible.append(metric)
+                return asahi_latest_response(tenant_id,visible)
 
     @app.get("/v1/me/tenants")
     def my_tenants(request: Request, authorization: str | None = Header(default=None)):

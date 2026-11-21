@@ -28,6 +28,14 @@ try {
     await page.getByText('Owari Camera').waitFor({timeout:15000});
     assert.equal(await page.getByText('Aichi NAS').count(),0);
     assert.equal(await page.getByText('Owari Camera').count(),1);
+    // Aichi and Owari metrics are deliberately distinct synthetic CI data.
+    const visibleNav=width<=760?'.mobileNav':'.sidebar';
+    await page.locator(visibleNav).getByRole('button',{name:'Monitoring'}).click();
+    await page.getByText('owari-telemetry').waitFor({timeout:15000});
+    assert.equal(await page.getByText('aichi-telemetry').count(),0);
+    await page.locator('select[aria-label="Select company"]').selectOption(fixture.tenant_a);
+    await page.getByText('aichi-telemetry').waitFor({timeout:15000});
+    assert.equal(await page.getByText('owari-telemetry').count(),0);
     if(width <= 760) assert.equal(await page.locator('.mobileNav').isVisible(),true);
     else assert.equal(await page.locator('.sidebar').isVisible(),true);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,
