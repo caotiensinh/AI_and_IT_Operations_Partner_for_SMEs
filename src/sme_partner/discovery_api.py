@@ -20,6 +20,13 @@ from .tenant_context import AuthorizedTenantContext, TenantAccessDenied
 
 
 
+class CreateRequirement(BaseModel):
+    requirement_id: UUID
+    statement: str = Field(min_length=1,max_length=4000)
+    classification: Literal["explicit","inferred","unverified"]
+    source_id: UUID | None = None
+
+
 class CreateSourceMetadata(BaseModel):
     source_id: UUID
     document_label: str = Field(min_length=1,max_length=200)
@@ -204,6 +211,33 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
                 response.status_code=200 if result[1] else 201
                 return {"tenant_id":str(tenant_id),"case_id":str(case_id),
                         "source_id":str(result[0]),"replayed":result[1]}
+
+
+    @app.post("/v1/tenants/{tenant_id}/research-cases/{case_id}/requirements",status_code=201)
+    def create_case_requirement(tenant_id: UUID,case_id: UUID,
+                                request: CreateRequirement,response: Response,
+                                authorization: str | None = Header(default=None)):
+        digest=_digest(authorization)
+        if not request.statement.strip() or (
+                request.classification=="explicit" and request.source_id is None):
+            raise HTTPException(422,"explicit statements require a source")
+        with connect() as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_app")
+                result=conn.execute(
+                    "SELECT result_requirement_id,is_replay,is_conflict "
+                    "FROM sme.create_discovery_requirement_once(%s,%s,%s,%s,%s,%s,%s)",
+                    (digest,tenant_id,case_id,request.requirement_id,
+                     request.statement,request.classification,request.source_id),
+                ).fetchone()
+                if not result or result[0] is None:
+                    raise HTTPException(403,"requirement creation denied")
+                if result[2]:
+                    raise HTTPException(409,"requirement ID reused for different statement")
+                response.status_code=200 if result[1] else 201
+                return {"tenant_id":str(tenant_id),"case_id":str(case_id),
+                        "requirement_id":str(result[0]),"approval_state":"proposed",
+                        "replayed":result[1]}
 
 
     return app
