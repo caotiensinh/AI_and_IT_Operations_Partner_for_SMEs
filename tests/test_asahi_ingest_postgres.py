@@ -125,7 +125,7 @@ class AsahiTrustedIngestTests(unittest.TestCase):
         def connect():
             return psycopg.connect(DSN)
         self.assertTrue(ingest_one(poller,connect,IngestAuthorization(self.enroll_a,self.token_a,DeviceBinding(self.a,self.site_a,self.device_a)),self.now))
-        self.assertFalse(ingest_one(poller,connect,IngestAuthorization(self.enroll_a,self.token_a),self.now))
+        self.assertFalse(ingest_one(poller,connect,IngestAuthorization(self.enroll_a,self.token_a,DeviceBinding(self.a,self.site_a,self.device_a)),self.now))
         poller.poll.assert_called_with(self.now)
     def test_worker_rejects_binding_mismatch(self):
         sample=NormalizedTelemetry(
