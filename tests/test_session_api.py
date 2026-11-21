@@ -29,7 +29,7 @@ class SessionApiE2ETests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.admin = psycopg.connect(DSN, autocommit=True)
-        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql"):
+        for name in ("0001_tenant_foundation.sql", "0002_scoped_rbac.sql", "0003_session_boundary.sql", "0005_security_audit.sql"):
             cls.admin.execute((ROOT / "migrations" / name).read_text())
         cls.a,cls.b,cls.user,cls.other,cls.site_a,cls.site_b,cls.asset_a,cls.asset_b = (uuid4() for _ in range(8))
         cls.token = _token()
@@ -134,6 +134,29 @@ class SessionApiE2ETests(unittest.TestCase):
         r=self.client.post('/v1/session/logout',headers={'Authorization':f'Bearer {token}'})
         self.assertEqual(r.status_code,204)
         self.assertEqual(self.get_assets(self.a,token).status_code,403)
+
+    def test_asset_list_creates_tenant_audit(self):
+        before=self.admin.execute("SELECT count(*) FROM sme.security_audit WHERE tenant_id=%s",(self.a,)).fetchone()[0]
+        self.assertEqual(self.get_assets(self.a,self.token).status_code,200)
+        after=self.admin.execute("SELECT count(*) FROM sme.security_audit WHERE tenant_id=%s",(self.a,)).fetchone()[0]
+        self.assertEqual(after,before+1)
+
+    def test_cross_tenant_audit_denied(self):
+        from uuid import uuid4
+        import hashlib
+        with self.admin.transaction():
+            self.admin.execute("SET LOCAL ROLE sme_app")
+            result=self.admin.execute(
+                "SELECT sme.record_session_audit(%s,%s,'asset.list','asset',%s)",
+                (hashlib.sha256(self.token.encode()).digest(),self.b,uuid4())
+            ).fetchone()[0]
+            self.assertFalse(result)
+
+    def test_runtime_cannot_mutate_audit(self):
+        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+            with self.admin.transaction():
+                self.admin.execute("SET LOCAL ROLE sme_app")
+                self.admin.execute("DELETE FROM sme.security_audit")
 
     def test_runtime_cannot_read_session_table(self):
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
