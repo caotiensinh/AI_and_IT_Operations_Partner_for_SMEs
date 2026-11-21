@@ -110,6 +110,7 @@ function Workspace() {
     <nav className="mobileNav" aria-label="Mobile navigation">
       <button className={view==='overview'?'active':''} onClick={()=>setView('overview')}>Overview</button>
       <button className={view==='assets'?'active':''} onClick={()=>setView('assets')}>Assets</button>
+      <button className={view==='monitoring'?'active':''} onClick={()=>setView('monitoring')}>Monitoring</button>
     </nav>
   </div>;
 }
