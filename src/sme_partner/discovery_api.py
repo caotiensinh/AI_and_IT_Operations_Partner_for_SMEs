@@ -12,7 +12,7 @@ from uuid import UUID
 import psycopg
 from fastapi import FastAPI, Header, HTTPException, Query
 
-from .rbac import Action, Assignment, PermissionDenied, Resource, Role, ScopeType, require_permission
+from .rbac import Action, Assignment, PERMISSIONS, PermissionDenied, Resource, Role, ScopeType, require_permission
 from .session_api import _digest
 from .tenant_context import AuthorizedTenantContext, TenantAccessDenied
 
@@ -31,11 +31,7 @@ def create_discovery_app(connect: Callable[[], psycopg.Connection]) -> FastAPI:
         full_tenant = False
         sites: set[UUID] = set()
         for role, scope_type, site_id, department_id in grants:
-            if Action.READ not in {
-                Role.OWNER: {Action.READ}, Role.ADMIN: {Action.READ},
-                Role.MANAGER: {Action.READ}, Role.OPERATOR: {Action.READ},
-                Role.VIEWER: {Action.READ},
-            }.get(Role(role), set()):
+            if Action.READ not in PERMISSIONS[Role(role)]:
                 continue
             if scope_type == "tenant":
                 full_tenant = True
