@@ -1,0 +1,31 @@
+name: Tenant PostgreSQL RLS
+on:
+  push:
+    paths: ['src/**','tests/**','migrations/**','.github/workflows/tenant-rls.yml']
+  pull_request:
+    paths: ['src/**','tests/**','migrations/**','.github/workflows/tenant-rls.yml']
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sme_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@localhost:5432/sme_test
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'psycopg[binary]>=3.2,<4'
+      - run: python -m unittest discover -s tests -v
