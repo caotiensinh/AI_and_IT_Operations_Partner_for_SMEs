@@ -37,6 +37,12 @@ def main():
                    (a,site_a,b,site_b))
         db.execute("INSERT INTO sme.assets(tenant_id,id,site_id,name) VALUES (%s,%s,%s,'Aichi NAS'),(%s,%s,%s,'Aichi Router'),(%s,%s,%s,'Owari Camera')",
                    (a,asset_a1,site_a,a,asset_a2,site_a,b,asset_b,site_b))
+        # Browser-only synthetic samples to test real UI->API->PostgreSQL data paths.
+        now=datetime.now(timezone.utc).replace(microsecond=0)
+        db.execute(
+            "INSERT INTO sme.asahi_samples(tenant_id,device_id,site_id,sampled_at,hostname,cpu_percent,memory_percent) "
+            "VALUES (%s,%s,%s,%s,'aichi-telemetry',27,35),(%s,%s,%s,%s,'owari-telemetry',81,62)",
+            (a,asset_a1,site_a,now,b,asset_b,site_b,now))
         for identity,tenant in ((u,a),(u,b),(other,a)):
             db.execute("INSERT INTO sme.role_assignments(tenant_id,id,identity_id,role,scope_type) VALUES (%s,%s,%s,'viewer','tenant')",
                        (tenant,uuid4(),identity))
