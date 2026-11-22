@@ -47,7 +47,7 @@ def main():
             (tenant,site,"Synthetic office"))
         conn.execute(
             "INSERT INTO sme.identities(id,issuer,subject) VALUES (%s,%s,%s)",
-            (identity,"https://synthetic.test",identity.hex))
+            (identity,"https://127.0.0.1:5174/oidc-test" if os.getenv("SME_E2E_OIDC_MODE")=="1" else "https://synthetic.test",identity.hex))
         conn.execute(
             "INSERT INTO sme.memberships(tenant_id,identity_id) VALUES (%s,%s)",
             (tenant,identity))
@@ -70,6 +70,7 @@ def main():
     fd = os.open(str(FIXTURE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(fd,"w",encoding="utf-8") as writer:
         json.dump({"tenant":str(tenant),"site":str(site),"token":token,
+                   **({"subject":identity.hex} if os.getenv("SME_E2E_OIDC_MODE")=="1" else {}),
                    **({"token_negative":token_negative} if token_negative else {})},writer)
     print("Synthetic E2E fixture initialized (no secrets logged)")
 
