@@ -43,6 +43,7 @@ jobs:
           git cat-file -e "$MAIN_SHA^{commit}"
           git merge-base --is-ancestor e53f64a1c638234ba143a2a86500f89fd8e4deb3 HEAD
           echo "MAIN_SHA=$MAIN_SHA" >> "$GITHUB_ENV"
+          echo "STAGING_REMOTE_BASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           git config user.name 'staging-integration-bot'
           git config user.email 'staging-integration-bot@users.noreply.github.com'
       - name: Reserve separate migration ranges before merging concurrently changed main
@@ -51,6 +52,7 @@ jobs:
           set -euo pipefail
           SME_STAGING_NAMESPACE_V2=1 python scripts/rebase_staging_migration_namespace.py
           git add -A
+          git commit -m "refactor(staging): isolate Discovery migration IDs 0100-0106"
       - name: Merge pinned main commit into isolated candidate without rewriting main
         shell: bash
         run: |
@@ -89,9 +91,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/integration/discovery-staging-20261122
-          initial="$(git rev-parse HEAD)"
           remote="$(git ls-remote origin refs/heads/integration/discovery-staging-20261122 | cut -f1)"
-          test "$remote" = "$initial"
+          test "$remote" = "$STAGING_REMOTE_BASE"
           git add -A
           git commit -m "test(staging): integrate pinned latest main with distinct Discovery migration namespace"
           result="$(git rev-parse HEAD)"
