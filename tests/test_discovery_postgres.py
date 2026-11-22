@@ -1081,3 +1081,52 @@ class DiscoveryPostgresTests(unittest.TestCase):
                                 "WHERE tenant_id=%s AND id=%s",(self.a,created))
             self._restore_viewer()
             self.db.execute("DELETE FROM sme.sessions WHERE id=%s",(sid,))
+
+    def test_cookie_bff_oidc_bridge_issues_cookie_then_reads_tenant(self):
+        from sme_partner.discovery_bff import create_cookie_discovery_app
+        from sme_partner.oidc_flow import LoginStart, LoginRejected
+        from fastapi.testclient import TestClient
+        token=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        sid=uuid4()
+        self.db.execute("INSERT INTO sme.sessions(id,identity_id,token_digest,expires_at) "
+                        "VALUES (%s,%s,%s,%s)",(sid,self.ia,hashlib.sha256(token.encode()).digest(),
+                        datetime.now(timezone.utc)+timedelta(hours=1)))
+        class SyntheticFlow:
+            settings=type("Settings",(),{"session_lifetime_seconds":3600})()
+            binding=secrets.token_urlsafe(32)
+            state=secrets.token_urlsafe(32)
+            done=False
+            def start(self):
+                return LoginStart("https://id.synthetic.test/authorize?state="+self.state,
+                                  self.state,self.binding)
+            def complete(self,*,state,browser_binding,code):
+                if (self.done or state!=self.state or browser_binding!=self.binding
+                        or code!="synthetic-code"):
+                    raise LoginRejected("invalid")
+                self.done=True
+                return token
+        try:
+            app=create_cookie_discovery_app(lambda:psycopg.connect(DSN),
+                csrf_secret=b"synthetic-cookie-oidc-gateway-test-secret",
+                trusted_origin="https://pilot.test",oidc_flow=SyntheticFlow())
+            with TestClient(app,base_url="https://pilot.test",follow_redirects=False) as browser:
+                self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+                start=browser.get("/auth/oidc/start")
+                self.assertEqual(start.status_code,302,start.text)
+                self.assertIn("__Host-sme_oidc_binding",start.headers["set-cookie"])
+                flow_state=start.headers["location"].split("state=")[1]
+                callback=browser.get("/auth/oidc/callback",params={
+                    "state":flow_state,"code":"synthetic-code"})
+                self.assertEqual(callback.status_code,303,callback.text)
+                self.assertEqual(callback.headers["location"],"/")
+                self.assertIn("__Host-sme_session",callback.headers["set-cookie"])
+                self.assertNotIn(token,callback.headers["location"])
+                tenant=browser.get("/auth/session/tenants")
+                self.assertEqual(tenant.status_code,200,tenant.text)
+                self.assertEqual(tenant.json()["tenants"][0]["id"],str(self.a))
+                self.assertEqual(browser.get("/v1/tenants/%s/research-cases" %
+                                             self.a).status_code,200)
+                self.assertEqual(browser.get("/auth/oidc/callback",params={
+                    "state":flow_state,"code":"synthetic-code"}).status_code,401)
+        finally:
+            self.db.execute("DELETE FROM sme.sessions WHERE id=%s",(sid,))
