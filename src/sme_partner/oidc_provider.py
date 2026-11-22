@@ -66,7 +66,7 @@ class PinnedProvider:
         if issuer.endswith("/") or issuer_parts.query:
             raise ValueError("issuer must be exact non-query URL without trailing slash")
         for name in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
-            _https_endpoint(getattr(self, name), required_host=issuer_parts.hostname)
+            _https_endpoint(getattr(self, name))
         callback = urlsplit(self.redirect_uri)
         if (callback.scheme != "https" or not callback.hostname
                 or callback.username or callback.password or callback.query
