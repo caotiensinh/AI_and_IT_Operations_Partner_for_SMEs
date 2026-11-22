@@ -133,11 +133,17 @@ def evaluate(manifest: dict, reader: GitHubReader) -> dict:
         runs = data.get("workflow_runs")
         if not isinstance(runs, list):
             raise GateError("Missing workflow runs")
+        if data.get("total_count", len(runs)) > len(runs):
+            raise GateError("Workflow evidence exceeds one response page")
+        # GitHub lists runs newest first. Never let an older green run
+        # overwrite the newest failed or still-running attempt.
+        examined: set[str] = set()
         for run in runs:
             if not isinstance(run, dict):
                 continue
             name = run.get("name")
-            if name in required and run.get("head_sha") == final_sha:
+            if name in required and name not in examined and run.get("head_sha") == final_sha:
+                examined.add(name)
                 found[name] = (run.get("status") == "completed"
                                and run.get("conclusion") in _ALLOWED_CI)
         for name in sorted(required):
