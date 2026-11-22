@@ -68,4 +68,44 @@ REVOKE ALL ON FUNCTION sme.revoke_asahi_delivery(bytea,uuid)
  FROM PUBLIC,sme_auth,sme_ingest,sme_dispatch;
 GRANT EXECUTE ON FUNCTION sme.approve_asahi_delivery(bytea,uuid,text,text,text) TO sme_app;
 GRANT EXECUTE ON FUNCTION sme.revoke_asahi_delivery(bytea,uuid) TO sme_app;
+-- Correct the Spec 016 BEFORE INSERT audit duplication under INSERT ON CONFLICT.
+-- Audit only the final physical operation. Keep safety checks BEFORE mutations.
+DROP TRIGGER IF EXISTS trg_asahi_delivery_policy_audit ON sme.asahi_delivery_destinations;
+CREATE OR REPLACE FUNCTION sme.guard_asahi_delivery_policy()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,sme AS $
+BEGIN
+ IF TG_OP='DELETE' THEN
+  RAISE EXCEPTION 'delivery policies must be revoked, not deleted';
+ END IF;
+ IF TG_OP='UPDATE' AND NEW.tenant_id<>OLD.tenant_id THEN
+  RAISE EXCEPTION 'cannot move policy between tenants';
+ END IF;
+ RETURN NEW;
+END $;
+CREATE OR REPLACE FUNCTION sme.record_asahi_delivery_policy_audit()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,sme AS $
+BEGIN
+ INSERT INTO sme.asahi_delivery_policy_audit(
+  tenant_id,actor_id,operation,previous_enabled,current_enabled
+ ) VALUES(
+  NEW.tenant_id,NEW.approved_by,
+  CASE WHEN TG_OP='INSERT' THEN 'created'
+       WHEN NEW.revoked_at IS NOT NULL AND OLD.revoked_at IS NULL THEN 'revoked'
+       ELSE 'updated' END,
+  CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.enabled END,
+  NEW.enabled
+ );
+ RETURN NEW;
+END $;
+REVOKE ALL ON FUNCTION sme.guard_asahi_delivery_policy() FROM PUBLIC;
+REVOKE ALL ON FUNCTION sme.record_asahi_delivery_policy_audit() FROM PUBLIC;
+CREATE TRIGGER trg_asahi_delivery_policy_guard
+ BEFORE UPDATE OR DELETE ON sme.asahi_delivery_destinations
+ FOR EACH ROW EXECUTE FUNCTION sme.guard_asahi_delivery_policy();
+CREATE TRIGGER trg_asahi_delivery_policy_audit
+ AFTER INSERT OR UPDATE ON sme.asahi_delivery_destinations
+ FOR EACH ROW EXECUTE FUNCTION sme.record_asahi_delivery_policy_audit();
+
 COMMIT;
