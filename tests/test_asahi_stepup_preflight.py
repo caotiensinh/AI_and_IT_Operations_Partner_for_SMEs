@@ -86,8 +86,11 @@ class DeploymentGateTests(unittest.TestCase):
             with self.subTest(name=name),self.assertRaises(PreflightDenied):
                 self.run_gate(config=replace(self.config,**{name:value}))
     def test_untrusted_jwks_rejected(self):
+        # OIDCConfig rejects missing key lists at construction, before preflight.
+        with self.assertRaises(ValueError):
+            replace(self.config.oidc,jwks={"keys":[]})
         for keys in (
-            [], [{"kty":"oct","kid":"bad"}],
+            [{"kty":"oct","kid":"bad"}],
             [{"kty":"RSA","kid":"bad","alg":"HS256"}]
         ):
             config=replace(self.config,oidc=replace(self.config.oidc,jwks={"keys":keys}))
