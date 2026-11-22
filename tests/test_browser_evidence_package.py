@@ -1,6 +1,7 @@
 """Evidence package structural, negative and boundary regressions."""
 import importlib.util
 import json
+import sys
 import hashlib
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ import zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/"scripts"))
 spec=importlib.util.spec_from_file_location("package_browser_evidence",ROOT/"scripts/package_browser_evidence.py")
 module=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
