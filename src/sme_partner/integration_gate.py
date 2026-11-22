@@ -44,8 +44,11 @@ class GitHubReader:
         try:
             with urlopen(Request(_ROOT + path, headers=headers),
                          timeout=self.timeout) as response:
-                payload = response.read(512_001)
-                if len(payload) > 512_000:
+                # GitHub compare responses include diff/file metadata even with
+                # per_page=1; cap at 4 MiB to accommodate a busy main branch.
+                limit = 4 * 1024 * 1024 if "/compare/" in path else 512_000
+                payload = response.read(limit + 1)
+                if len(payload) > limit:
                     raise GateError("GitHub API response exceeds size limit")
                 data = json.loads(payload)
                 if not isinstance(data, dict):
