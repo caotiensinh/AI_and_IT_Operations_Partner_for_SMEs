@@ -9,6 +9,9 @@ export default defineConfig(({mode})=>{
   }
   return {server:{
     host:"127.0.0.1",
-    proxy:target?{"/v1":{target,changeOrigin:false}}:undefined
+    proxy:target?{
+      "/v1":{target,changeOrigin:false},
+      "/auth":{target,changeOrigin:false}
+    }:undefined
   }};
 });
