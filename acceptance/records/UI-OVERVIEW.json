@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "status": "IN_PROGRESS",
+  "level": "L1",
+  "environment": "staging",
+  "commit_sha": "b5b0ec8970f71d727f3244a2a4ca2ff848725cc5",
+  "owner": "implementation-team",
+  "gates": {
+    "contract": true,
+    "persist": true,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "id": "UI-OVERVIEW",
+  "title": "Authenticated company overview",
+  "scope": "Overview screen displays only tenant-authorized assets and accurately marks unavailable services",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "User is authenticated and belongs to a tenant",
+      "when": "User loads Overview",
+      "then": "Visible asset count matches permitted asset API response",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-02",
+      "given": "User switches to a different permitted tenant",
+      "when": "Overview refreshes",
+      "then": "Assets and totals from previous tenant are cleared and not displayed",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-03",
+      "given": "Backend is down or session is revoked",
+      "when": "User opens or refreshes Overview",
+      "then": "No protected data is shown; clear error and sign-in recovery are available",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-04",
+      "given": "Browser is desktop 1440x900 and mobile 390x844",
+      "when": "User navigates Overview",
+      "then": "No critical inaccessible controls or horizontal overflow",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "blockers": [
+    "No deployed staging URL and authenticated end-to-end browser capture verified",
+    "No independently reviewed UI/API tenant isolation evidence",
+    "No restart/recovery and user sign-off"
+  ]
+}
