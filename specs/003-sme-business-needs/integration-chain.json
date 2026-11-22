@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repository": "caotiensinh/AI_and_IT_Operations_Partner_for_SMEs",
-  "description": "Read-only integration evidence for currently open stacked discovery/OIDC PRs, not authorization to merge.",
+  "description": "Complete open Discovery/OIDC PR chain #15–#55, foundation #13 merged into main. Terminal CI snapshot, no permission to merge.",
   "pull_requests": [
+    {
+      "number": 15,
+      "head": "025a7787ed1a58af1d41d57f339e66bbc7b6c3cc",
+      "base": "feat/discovery-postgres-read-api-011"
+    },
+    {
+      "number": 17,
+      "head": "81b05ba6d87cbb12acc9d8ae74a0138ec1f946da",
+      "base": "feat/discovery-pagination-scopes-014"
+    },
+    {
+      "number": 18,
+      "head": "7f455abd4170e8421113a1dc735ce8d2adc92fcd",
+      "base": "feat/discovery-authorized-create-audit-016"
+    },
     {
       "number": 19,
       "head": "7fb9a3ba075f5f8377fa857776f641bd98aaa275",
@@ -76,5 +91,11 @@
       "Integration kernel tests",
       "OIDC identity verification"
     ]
+  },
+  "foundation": {
+    "merged_pr": 13,
+    "head": "38b74f33791b717c3e9ff010f1f88d187d139cbc",
+    "merge_commit": "4474581514b7cf93da70d79c6b1968c9f478eb73",
+    "base_branch": "feat/discovery-postgres-read-api-011"
   }
 }
