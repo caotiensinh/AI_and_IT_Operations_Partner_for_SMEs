@@ -8,7 +8,9 @@ and never logs credential values.
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import threading
+import time
 import hashlib
 import hmac
 import secrets
@@ -69,10 +71,19 @@ class OIDCLoginFlow:
         settings: OIDCLoginSettings,
         store: LoginStore,
         exchange_code: Callable[[str, str, str, str], str],
+        *,
+        refresh_jwks: Callable[[], dict] | None = None,
+        jwks_min_refresh_interval_seconds: int = 60,
     ):
+        if not 30 <= jwks_min_refresh_interval_seconds <= 3600:
+            raise ValueError("JWKS refresh interval outside allowed bounds")
         self.settings = settings
         self.store = store
         self.exchange_code = exchange_code
+        self._refresh_jwks = refresh_jwks
+        self._min_refresh_interval = jwks_min_refresh_interval_seconds
+        self._last_refresh = float("-inf")
+        self._refresh_lock = threading.Lock()
 
     def start(self) -> LoginStart:
         state, binding, nonce = _secret(), _secret(), _secret()
@@ -106,8 +117,24 @@ class OIDCLoginFlow:
             id_token = self.exchange_code(
                 code, verifier, self.settings.redirect_uri, self.settings.oidc.client_id
             )
-            subject = verify_id_token(id_token, self.settings.oidc, expected_nonce=nonce)
-        except (AuthenticationDenied, ValueError, TypeError):
+            try:
+                subject = verify_id_token(id_token, self.settings.oidc, expected_nonce=nonce)
+            except AuthenticationDenied as exc:
+                if str(exc) != "signing key unavailable" or self._refresh_jwks is None:
+                    raise
+                # Only refresh the operator-pinned JWKS endpoint when a new kid
+                # appears. Do not follow JWT header key URLs or refresh for
+                # invalid signatures/claims. Throttle across concurrent logins.
+                with self._refresh_lock:
+                    now = time.monotonic()
+                    if now - self._last_refresh >= self._min_refresh_interval:
+                        self._last_refresh = now
+                        keys = self._refresh_jwks()
+                        candidate = replace(self.settings.oidc, jwks=keys)
+                        self.settings = replace(self.settings, oidc=candidate)
+                    active = self.settings.oidc
+                subject = verify_id_token(id_token, active, expected_nonce=nonce)
+        except (AuthenticationDenied, ValueError, TypeError, RuntimeError, OSError):
             raise LoginRejected("login failed") from None
         # A new credential is issued only after signature, issuer, audience and nonce
         # validation and an active internal identity/membership match in the DB.
