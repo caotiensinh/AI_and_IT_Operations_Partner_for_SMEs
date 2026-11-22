@@ -29,9 +29,9 @@ jobs:
     env:
       SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@127.0.0.1:5432/sme_browser
       SME_E2E_FIXTURE_MODE: disposable_ci_only
-      SME_E2E_FIXTURE_PATH: ${{ runner.temp }}/sme-browser-fixture.json
+      SME_E2E_FIXTURE_PATH: /tmp/sme-browser-${{ github.run_id }}.json
       PYTHONPATH: src
-      SME_E2E_SCREENSHOT_DIR: ${{ runner.temp }}/sme-browser-evidence
+      SME_E2E_SCREENSHOT_DIR: /tmp/sme-browser-evidence-${{ github.run_id }}
       CI_SOURCE_SHA: ${{ github.sha }}
       SME_EVIDENCE_ROOT: ${{ vars.SME_EVIDENCE_ROOT }}
     steps:
