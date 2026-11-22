@@ -123,6 +123,49 @@ class PollLeaseTests(unittest.TestCase):
                     self.admin.execute("SET LOCAL ROLE "+role)
                     self.admin.execute("SELECT * FROM sme.asahi_poll_lease").fetchall()
 
+    def test_real_database_lease_tick_ingests_exactly_once(self):
+        from datetime import datetime,timezone
+        from unittest.mock import Mock
+        from sme_partner.adapters.asahi import DeviceBinding,NormalizedTelemetry
+        from sme_partner.asahi_ingest import IngestAuthorization
+        from sme_partner.asahi_leased_worker import run_leased_ingest_tick
+        when=datetime.now(timezone.utc).replace(microsecond=0)
+        binding=DeviceBinding(self.tenant,self.site,self.device)
+        sample=NormalizedTelemetry(tenant_id=self.tenant,site_id=self.site,
+            device_id=self.device,sampled_at=when,hostname='lease-node',
+            cpu_percent=27.5,memory_percent=44,uptime_seconds=60,disk_mounts=())
+        poller=Mock()
+        poller.poll.return_value=sample
+        auth=IngestAuthorization(self.enrollment,self.token,binding)
+        params=dict(poller=poller,connect=lambda:psycopg.connect(DSN),
+                    auth=auth,worker_id=self.holder,observed_at=when)
+        self.assertEqual(run_leased_ingest_tick(**params),"inserted")
+        self.assertEqual(run_leased_ingest_tick(**params),"not_due")
+        poller.poll.assert_called_once_with(when)
+        count=self.admin.execute(
+            "SELECT count(*) FROM sme.asahi_samples WHERE tenant_id=%s AND device_id=%s AND sampled_at=%s",
+            (self.tenant,self.device,when)).fetchone()[0]
+        self.assertEqual(count,1)
+
+    def test_poll_error_sets_retry_due_without_inserting_sample(self):
+        from datetime import datetime,timezone
+        from unittest.mock import Mock
+        from sme_partner.adapters.asahi import DeviceBinding
+        from sme_partner.asahi_ingest import IngestAuthorization
+        from sme_partner.asahi_leased_worker import run_leased_ingest_tick
+        poller=Mock()
+        poller.poll.side_effect=TimeoutError('offline')
+        when=datetime.now(timezone.utc)
+        auth=IngestAuthorization(self.enrollment,self.token,
+                                 DeviceBinding(self.tenant,self.site,self.device))
+        with self.assertRaises(TimeoutError):
+            run_leased_ingest_tick(poller=poller,connect=lambda:psycopg.connect(DSN),
+                auth=auth,worker_id=self.holder,observed_at=when)
+        outcome=self.admin.execute(
+            "SELECT last_outcome FROM sme.asahi_poll_lease WHERE enrollment_id=%s",
+            (self.enrollment,)).fetchone()[0]
+        self.assertEqual(outcome,'retry')
+
     def test_web_cannot_claim(self):
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
             self.claim(role="sme_app")
