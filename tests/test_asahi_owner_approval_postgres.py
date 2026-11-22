@@ -375,6 +375,53 @@ class OwnerApprovalTests(unittest.TestCase):
         self.assertFalse(self.call("approve_asahi_delivery_stepup",
             self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
 
+    def test_stepup_callback_lookup_uses_stored_action_and_separate_executor(self):
+        from sme_partner.asahi_stepup_oidc_flow import PostgresStepupStore, StepupAction
+        from sme_partner.asahi_stepup_approval import PostgresApprovalExecutor
+        store=PostgresStepupStore(lambda: psycopg.connect(DSN))
+        action=StepupAction(self.tenant,"approve","email","tenant/alerts","tenant/secret")
+        state=os.urandom(32)
+        browser=os.urandom(32)
+        self.assertTrue(store.begin(
+            state_digest=state,browser_digest=browser,session_digest=self.digest,
+            action=action,verifier="v"*64,nonce="n"*43
+        ))
+        self.assertEqual(store.lookup(state_digest=state,browser_digest=browser,
+                                       session_digest=self.digest),action)
+        self.assertIsNone(store.lookup(state_digest=state,browser_digest=os.urandom(32),
+                                        session_digest=self.digest))
+        self.assertIsNone(store.lookup(state_digest=state,browser_digest=browser,
+                                        session_digest=self.other_digest))
+        proof=store.issue(session_digest=self.digest,action=action,lifetime=60)
+        self.assertIsNotNone(proof)
+        executor=PostgresApprovalExecutor(lambda: psycopg.connect(DSN))
+        self.assertTrue(executor(self.digest,action,proof))
+        self.assertFalse(executor(self.digest,action,proof))
+        self.assertEqual(self.db.execute(
+            "SELECT count(*) FROM sme.asahi_delivery_policy_audit WHERE tenant_id=%s",
+            (self.tenant,)).fetchone()[0],1)
+
+    def test_stepup_callback_lookup_restricted_and_revoked(self):
+        from sme_partner.asahi_stepup_oidc_flow import PostgresStepupStore,StepupAction
+        store=PostgresStepupStore(lambda: psycopg.connect(DSN))
+        state=os.urandom(32)
+        browser=os.urandom(32)
+        action=StepupAction(self.tenant,"revoke")
+        self.assertTrue(store.begin(
+            state_digest=state,browser_digest=browser,session_digest=self.digest,
+            action=action,verifier="v"*64,nonce="n"*43))
+        for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch","sme_approval"):
+            with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                with psycopg.connect(DSN) as conn:
+                    with conn.transaction():
+                        conn.execute("SET LOCAL ROLE "+role)
+                        conn.execute("SELECT * FROM sme.lookup_asahi_stepup_challenge(%s,%s,%s)",
+                                     (state,browser,self.digest)).fetchall()
+        self.db.execute("UPDATE sme.sessions SET revoked_at=now() WHERE token_digest=%s",
+                        (self.digest,))
+        self.assertIsNone(store.lookup(state_digest=state,browser_digest=browser,
+                                        session_digest=self.digest))
+
     def test_runtime_roles_no_direct_access(self):
         for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch"):
             with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
