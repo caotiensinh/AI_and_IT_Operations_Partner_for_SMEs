@@ -17,6 +17,12 @@ class SyntheticReader:
         self.change=change
         self.calls=[]
         self.prs={}
+        foundation=manifest["foundation"]
+        self.prs[foundation["merged_pr"]]={
+            "state":"closed","merged_at":"2026-11-21T13:47:07Z",
+            "merge_commit_sha":foundation["merge_commit"],
+            "head":{"sha":foundation["head"],"ref":foundation["base_branch"]}
+        }
         prior=None
         for index,node in enumerate(manifest["pull_requests"]):
             ref=(manifest["pull_requests"][index+1]["base"]
@@ -43,6 +49,8 @@ class SyntheticReader:
             if self.change and n==self.change[0]:
                 self.change[1](data)
             return data
+        if "/compare/" in path:
+            return {"status":"ahead","behind_by":0}
         if "/actions/runs" in path:
             return {"workflow_runs":self.runs}
         raise GateError("Unexpected test route")
@@ -53,7 +61,7 @@ class IntegrationGateTests(unittest.TestCase):
         repo,nodes,terminal=_safe_spec(MANIFEST)
         self.assertEqual(repo,"caotiensinh/AI_and_IT_Operations_Partner_for_SMEs")
         self.assertEqual(nodes[-1]["number"],terminal["pr"])
-        self.assertEqual(len(nodes),13)
+        self.assertEqual(len(nodes),16)
         self.assertEqual(len({x["number"] for x in nodes}),len(nodes))
 
     def test_all_green_exact_sha_is_ready(self):
@@ -61,8 +69,38 @@ class IntegrationGateTests(unittest.TestCase):
         report=evaluate(MANIFEST,reader)
         self.assertTrue(report["ready"],report)
         self.assertTrue(all(x["passed"] for x in report["checks"]))
-        self.assertEqual(len(reader.calls),14)
+        self.assertEqual(len(reader.calls),19)
         self.assertTrue(reader.calls[-1].endswith("head_sha="+MANIFEST["pull_requests"][-1]["head"]+"&per_page=100"))
+
+    def test_foundation_unmerged_or_not_in_main_blocks(self):
+        foundation=MANIFEST["foundation"]
+        class BadFoundation(SyntheticReader):
+            def get(self,path):
+                obj=super().get(path)
+                if path.endswith("/pulls/"+str(foundation["merged_pr"])):
+                    obj["merged_at"]=None
+                return obj
+        report=evaluate(MANIFEST,BadFoundation(MANIFEST))
+        self.assertFalse(report["ready"])
+        self.assertIn("foundation.merged_pr",{x["check"] for x in report["checks"] if not x["passed"]})
+        class UnrelatedMain(SyntheticReader):
+            def get(self,path):
+                obj=super().get(path)
+                if "/compare/" in path:
+                    obj["status"]="diverged"
+                    obj["behind_by"]=1
+                return obj
+        report=evaluate(MANIFEST,UnrelatedMain(MANIFEST))
+        self.assertFalse(report["ready"])
+        self.assertIn("foundation.main_ancestor",{x["check"] for x in report["checks"] if not x["passed"]})
+
+    def test_missing_first_foundation_branch_blocks(self):
+        first=MANIFEST["pull_requests"][0]["number"]
+        def wrong(pr):pr["base"]["ref"]="main"
+        report=evaluate(MANIFEST,SyntheticReader(MANIFEST,change=(first,wrong)))
+        self.assertFalse(report["ready"])
+        self.assertIn("pr."+str(first)+".foundation",
+                      {x["check"] for x in report["checks"] if not x["passed"]})
 
     def test_stale_head_sha_blocks_chain(self):
         def mutate(pr):pr["head"]["sha"]="a"*40
