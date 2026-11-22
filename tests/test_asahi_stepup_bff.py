@@ -122,7 +122,10 @@ class StepupBffTests(unittest.TestCase):
     def test_callback_rejects_forgery_and_not_uses_query_target(self):
         self.request()
         self.assertEqual(self.callback(state="x"*43).status_code,403)
+        # A failed callback deliberately clears the browser binding cookie.
+        self.request()
         self.assertEqual(self.callback(code="invalid-code-1234567").status_code,403)
+        self.request()
         # The query target is ignored; only server-persisted action gets applied.
         self.assertEqual(self.callback(tenant="attacker",destination_ref="other").status_code,303)
         self.assertEqual(self.applied[0][1].destination_ref,"tenant/alerts")
