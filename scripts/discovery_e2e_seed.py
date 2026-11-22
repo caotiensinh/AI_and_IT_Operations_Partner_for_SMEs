@@ -31,9 +31,10 @@ def main():
         raise SystemExit("Fixture already exists; refusing overwrite")
     tenant, site, identity = uuid4(), uuid4(), uuid4()
     token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+    token_negative = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=") if os.getenv("SME_E2E_COOKIE_MODE")=="1" else None
     with psycopg.connect(DSN) as conn:
         # Migrations run with the migration/provisioning owner, never runtime app.
-        for number in (1,2,3,5,6,7,8,9,10,11):
+        for number in (1,2,3,5,6,7,8,9,10,11,12) if os.getenv("SME_E2E_COOKIE_MODE")=="1" else (1,2,3,5,6,7,8,9,10,11):
             matches = list((ROOT / "migrations").glob(f"{number:04d}_*.sql"))
             if len(matches) != 1:
                 raise RuntimeError(f"Expected exactly one migration {number:04d}")
@@ -60,10 +61,16 @@ def main():
             "VALUES (%s,%s,%s,%s)",
             (uuid4(),identity,hashlib.sha256(token.encode()).digest(),
              datetime.now(timezone.utc)+timedelta(minutes=40)))
+        if token_negative:
+            conn.execute("INSERT INTO sme.sessions(id,identity_id,token_digest,expires_at) "
+                "VALUES (%s,%s,%s,%s)",(uuid4(),identity,
+                hashlib.sha256(token_negative.encode()).digest(),
+                datetime.now(timezone.utc)+timedelta(minutes=40)))
     FIXTURE.parent.mkdir(parents=True,exist_ok=True)
     fd = os.open(str(FIXTURE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(fd,"w",encoding="utf-8") as writer:
-        json.dump({"tenant":str(tenant),"site":str(site),"token":token},writer)
+        json.dump({"tenant":str(tenant),"site":str(site),"token":token,
+                   **({"token_negative":token_negative} if token_negative else {})},writer)
     print("Synthetic E2E fixture initialized (no secrets logged)")
 
 

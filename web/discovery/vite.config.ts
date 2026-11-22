@@ -1,4 +1,5 @@
 import {defineConfig,loadEnv} from "vite";
+import {readFileSync} from "node:fs";
 export default defineConfig(({mode})=>{
   const env=loadEnv(mode,".","DISCOVERY_");
   const target=env.DISCOVERY_API_ORIGIN;
@@ -9,6 +10,10 @@ export default defineConfig(({mode})=>{
   }
   return {server:{
     host:"127.0.0.1",
+    https:env.DISCOVERY_TLS_CERT&&env.DISCOVERY_TLS_KEY?{
+      cert:readFileSync(env.DISCOVERY_TLS_CERT),
+      key:readFileSync(env.DISCOVERY_TLS_KEY)
+    }:undefined,
     proxy:target?{
       "/v1":{target,changeOrigin:false},
       "/auth":{target,changeOrigin:false}
