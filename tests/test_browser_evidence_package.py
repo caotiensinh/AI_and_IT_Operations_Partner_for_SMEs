@@ -1,6 +1,7 @@
 """Evidence package structural, negative and boundary regressions."""
 import importlib.util
 import json
+import hashlib
 import tempfile
 import unittest
 import zipfile
@@ -13,7 +14,7 @@ spec.loader.exec_module(module)
 SHA="a"*40
 # Minimal valid PNG signature/IHDR dimensions for structural checks; not a rendered screenshot.
 def png(width,height):
-    return b"\x89PNG\r\n\x1a\n"+b"\x00\x00\x00\x0dIHDR"+width.to_bytes(4,"big")+height.to_bytes(4,"big")+b"\x08\x02\x00\x00\x00"+b"\x00"*8
+    return b"\x89PNG\r\n\x1a\n"+b"\x00\x00\x00\x0dIHDR"+width.to_bytes(4,"big")+height.to_bytes(4,"big")+b"\x08\x02\x00\x00\x00"+b"\x00"*8+b"\x00"*5000
 
 class BrowserEvidencePackageTests(unittest.TestCase):
     def setUp(self):
@@ -24,8 +25,8 @@ class BrowserEvidencePackageTests(unittest.TestCase):
         for name in sorted(module.NAMES):
             width,height=(390,844) if name.startswith("unauthorized") else tuple(map(int,name.rsplit("-",1)[1].split("x")))
             (self.root/(name+".png")).write_bytes(png(width,height))
-            self.entries.append({"name":name,"viewport":{"width":width,"height":height},"source":"synthetic CI fixture"})
-        self.manifest={"evidence_type":"INTEGRATION_TEST_NOT_USER_ACCEPTANCE","synthetic_data":True,"idp":"CI header-token bypass; not real OIDC browser login","production_ready":False,"source_sha":SHA,"screens":self.entries}
+            self.entries.append({"name":name,"file":name+".png","viewport":{"width":width,"height":height},"actual_png":{"width":width,"height":height,"bytes":len(png(width,height)),"sha256":hashlib.sha256(png(width,height)).hexdigest()},"source":"synthetic CI fixture"})
+        self.manifest={"evidence_type":"INTEGRATION_TEST_NOT_USER_ACCEPTANCE","synthetic_data":True,"idp":"CI header-token bypass; not real OIDC browser login","production_ready":False,"source_sha":SHA,"acceptance_status":"UNREVIEWED","archival_status":"NOT_VERIFIED","capture_integrity_verified":True,"expected_screen_count":13,"actual_screen_count":13,"screens":self.entries}
         self.save()
     def save(self):
         (self.root/"manifest.json").write_text(json.dumps(self.manifest))
