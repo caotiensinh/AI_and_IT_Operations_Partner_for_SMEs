@@ -31,7 +31,15 @@ class Report:
 
     @property
     def ready(self) -> bool:
-        return bool(self.checks) and all(item.passed for item in self.checks)
+        required = {
+            "config.required", "config.database_split", "config.csrf",
+            "config.origin", "config.callback", "config.mfa_policy",
+            "provider.pinned", "provider.discovery", "provider.jwks",
+            "db.sme_app.identity", "db.sme_auth.identity",
+        }
+        present = {item.name for item in self.checks}
+        # Skipped live provider/database checks can never mean deployment-ready.
+        return required.issubset(present) and all(item.passed for item in self.checks)
 
     def public_dict(self) -> dict:
         return {"ready": self.ready,
