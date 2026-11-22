@@ -34,7 +34,11 @@ class GitHubReader:
         self.timeout = timeout
 
     def get(self, path: str) -> dict:
-        if not path.startswith("/repos/") or ".." in path:
+        # GitHub compare uses a literal three-dot revision separator.
+        # Reject actual parent-path segments, not the valid 'base...head' syntax.
+        if (not path.startswith("/repos/") or
+                any(segment in (".", "..") for segment in path.split("?",1)[0].split("/"))
+                or "%2e" in path.lower()):
             raise GateError("Invalid GitHub API path")
         headers = {"Accept": "application/vnd.github+json",
                    "User-Agent": "sme-partner-integration-gate",
