@@ -34,7 +34,7 @@ jobs:
         run: |
           python -m sme_partner.integration_gate \
             --manifest specs/003-sme-business-needs/integration-chain.json \
-            > /tmp/discovery-integration-readiness.json
+            > /tmp/discovery-integration-readiness.json || gate_failed=1
           python - <<'PY'
           import json
           p=json.load(open('/tmp/discovery-integration-readiness.json'))
