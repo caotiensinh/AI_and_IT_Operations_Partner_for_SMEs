@@ -74,7 +74,7 @@ DROP TRIGGER IF EXISTS trg_asahi_delivery_policy_audit ON sme.asahi_delivery_des
 DROP TRIGGER IF EXISTS trg_asahi_delivery_policy_guard ON sme.asahi_delivery_destinations;
 CREATE OR REPLACE FUNCTION sme.guard_asahi_delivery_policy()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
-SET search_path=pg_catalog,sme AS $
+SET search_path=pg_catalog,sme AS $body$
 BEGIN
  IF TG_OP='DELETE' THEN
   RAISE EXCEPTION 'delivery policies must be revoked, not deleted';
@@ -83,10 +83,10 @@ BEGIN
   RAISE EXCEPTION 'cannot move policy between tenants';
  END IF;
  RETURN NEW;
-END $;
+END $body$;
 CREATE OR REPLACE FUNCTION sme.record_asahi_delivery_policy_audit()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
-SET search_path=pg_catalog,sme AS $
+SET search_path=pg_catalog,sme AS $body$
 BEGIN
  INSERT INTO sme.asahi_delivery_policy_audit(
   tenant_id,actor_id,operation,previous_enabled,current_enabled
@@ -99,7 +99,7 @@ BEGIN
   NEW.enabled
  );
  RETURN NEW;
-END $;
+END $body$;
 REVOKE ALL ON FUNCTION sme.guard_asahi_delivery_policy() FROM PUBLIC;
 REVOKE ALL ON FUNCTION sme.record_asahi_delivery_policy_audit() FROM PUBLIC;
 CREATE TRIGGER trg_asahi_delivery_policy_guard
