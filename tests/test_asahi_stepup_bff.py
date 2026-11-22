@@ -58,7 +58,7 @@ class StepupBffTests(unittest.TestCase):
             csrf_key=self.key,session_active=lambda token:self.active and token=="t"*43,
             apply_proof=lambda digest,action,proof:
                 self.applied.append((digest,action,proof)) or True,
-            enabled=True,
+            enabled=True,production_preflight=lambda:None,
         )
         self.client=TestClient(self.app,base_url="https://app.example",
                                follow_redirects=False)
@@ -139,6 +139,23 @@ class StepupBffTests(unittest.TestCase):
         self.assertEqual(self.callback().status_code,403)
         self.assertEqual(self.applied,[])
 
+    def test_enabled_requires_preflight_and_fails_before_registering_routes(self):
+        def configure(preflight):
+            app=FastAPI()
+            install_asahi_stepup_bff(
+                app,self.flow,public_origin="https://app.example",
+                csrf_key=self.key,session_active=lambda token:True,
+                apply_proof=lambda digest,action,proof:True,enabled=True,
+                production_preflight=preflight,
+            )
+            return app
+        with self.assertRaises(ValueError):
+            configure(None)
+        from sme_partner.asahi_stepup_preflight import PreflightDenied
+        with self.assertRaises(PreflightDenied):
+            configure(lambda: (_ for _ in ()).throw(PreflightDenied("not ready")))
+        self.assertEqual(len(configure(lambda:None).routes)>0,True)
+
     def test_disabled_by_default_and_invalid_origin_config(self):
         app=FastAPI()
         install_asahi_stepup_bff(app,self.flow,public_origin="https://app.example",
@@ -153,4 +170,5 @@ class StepupBffTests(unittest.TestCase):
                 install_asahi_stepup_bff(FastAPI(),self.flow,
                   public_origin=origin,csrf_key=self.key,
                   session_active=lambda token:True,
-                  apply_proof=lambda digest,action,proof:True,enabled=True)
+                  apply_proof=lambda digest,action,proof:True,enabled=True,
+                  production_preflight=lambda:None)
