@@ -1,3 +1,4 @@
+-- Integrated staging canonical migration 0026 (main 0001-0019, Discovery 0020-0026).
 -- Browser BFF tenant selector: server-verified session, no user-provided tenant grants.
 BEGIN;
 CREATE OR REPLACE FUNCTION sme.list_browser_session_tenants(p_digest bytea)
