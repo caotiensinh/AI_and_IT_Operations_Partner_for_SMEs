@@ -63,6 +63,8 @@ class StepupStore(Protocol):
               verifier: str, nonce: str) -> bool: ...
     def consume(self, *, state_digest: bytes, browser_digest: bytes,
                 session_digest: bytes, action: StepupAction) -> tuple[str,str] | None: ...
+    def lookup(self, *, state_digest: bytes, browser_digest: bytes,
+               session_digest: bytes) -> StepupAction | None: ...
     def identity(self, session_digest: bytes, tenant: UUID) -> tuple[str,str] | None: ...
     def issue(self, *, session_digest: bytes, action: StepupAction,
               lifetime: int) -> UUID | None: ...
@@ -176,6 +178,17 @@ class PostgresStepupStore:
                      action.action,action.channel,action.destination_ref,action.secret_ref)
                 ).fetchone()
                 return (row[0],row[1]) if row else None
+
+    def lookup(self, *, state_digest: bytes, browser_digest: bytes,
+               session_digest: bytes) -> StepupAction | None:
+        with self.connect() as conn:
+            with conn.transaction():
+                row=conn.execute(
+                    "SELECT tenant_id,action,channel,destination_ref,secret_ref "
+                    "FROM sme.lookup_asahi_stepup_challenge(%s,%s,%s)",
+                    (state_digest,browser_digest,session_digest)
+                ).fetchone()
+                return StepupAction(*row) if row else None
 
     def identity(self, session_digest: bytes, tenant: UUID) -> tuple[str,str] | None:
         with self.connect() as conn:
