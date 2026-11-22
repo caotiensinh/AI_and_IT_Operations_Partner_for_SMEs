@@ -15,12 +15,12 @@ CREATE TABLE IF NOT EXISTS sme.asahi_delivery_destinations (
    REFERENCES sme.memberships(tenant_id,identity_id) ON DELETE RESTRICT,
  CONSTRAINT asahi_destination_ref_safe CHECK (
     destination_ref ~ '^[A-Za-z0-9_./-]{1,128}$'
-    AND destination_ref !~ '(^|/)\\.\\.(/|$)'
+    AND destination_ref !~ '(^|/)[.][.](/|$)'
     AND left(destination_ref,1)<>'/'
  ),
  CONSTRAINT asahi_secret_ref_safe CHECK (
     secret_ref ~ '^[A-Za-z0-9_./-]{1,128}$'
-    AND secret_ref !~ '(^|/)\\.\\.(/|$)'
+    AND secret_ref !~ '(^|/)[.][.](/|$)'
     AND left(secret_ref,1)<>'/'
  ),
  CONSTRAINT asahi_delivery_enabled_not_revoked CHECK (NOT enabled OR revoked_at IS NULL)
