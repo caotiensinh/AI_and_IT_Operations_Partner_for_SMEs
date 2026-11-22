@@ -236,6 +236,42 @@ class OwnerApprovalTests(unittest.TestCase):
                 "email","tenant/../unsafe","tenant/secret"))
         self.assertIsNone(self.issue("unknown",self.digest,self.tenant))
 
+    def stepup_identity(self, digest, tenant):
+        with psycopg.connect(DSN) as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_stepup")
+                return conn.execute(
+                    "SELECT issuer,subject FROM sme.resolve_asahi_stepup_identity(%s,%s)",
+                    (digest,tenant),
+                ).fetchone()
+
+    def test_stepup_identity_lookup_matches_session_owner(self):
+        row = self.stepup_identity(self.digest,self.tenant)
+        self.assertEqual(row,("test",self.actor.hex))
+        self.assertIsNone(self.stepup_identity(self.other_digest,self.tenant))
+        self.assertIsNone(self.stepup_identity(self.digest,uuid4()))
+        self.assertIsNone(self.stepup_identity(os.urandom(32),self.tenant))
+
+    def test_stepup_identity_lookup_rechecks_revocation_and_role(self):
+        self.assertIsNotNone(self.stepup_identity(self.digest,self.tenant))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=now() WHERE token_digest=%s",
+                        (self.digest,))
+        self.assertIsNone(self.stepup_identity(self.digest,self.tenant))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=NULL WHERE token_digest=%s",
+                        (self.digest,))
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND id=%s",
+                        (self.tenant,self.role_id))
+        self.assertIsNone(self.stepup_identity(self.digest,self.tenant))
+
+    def test_stepup_identity_lookup_is_isolated_to_issuer_role(self):
+        for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch","sme_approval"):
+            with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                with psycopg.connect(DSN) as conn:
+                    with conn.transaction():
+                        conn.execute("SET LOCAL ROLE " + role)
+                        conn.execute("SELECT * FROM sme.resolve_asahi_stepup_identity(%s,%s)",
+                                     (self.digest,self.tenant)).fetchall()
+
     def test_runtime_roles_no_direct_access(self):
         for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch"):
             with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):

@@ -48,6 +48,7 @@ class VerifiedOIDCSubject:
     authenticated_at: int
     expires_at: int
     mfa_satisfied: bool
+    authentication_time: int | None = None
 
 
 def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = None, expected_nonce: str | None = None) -> VerifiedOIDCSubject:
@@ -119,12 +120,20 @@ def verify_id_token(token: str, config: OIDCConfig, *, now: datetime | None = No
         acr_ok = (isinstance(claims.get("acr"), str)
                   and claims["acr"] in config.accepted_acr)
         has_mfa = amr_ok or acr_ok
+        auth_time = claims.get("auth_time")
+        if auth_time is not None:
+            if type(auth_time) is not int or auth_time < 0:
+                raise AuthenticationDenied("invalid authentication time")
+            if auth_time > timestamp + config.leeway_seconds:
+                raise AuthenticationDenied("future authentication time")
+            if auth_time > issued_at + config.leeway_seconds:
+                raise AuthenticationDenied("authentication after token issuance")
         if config.require_mfa and not has_mfa:
             raise AuthenticationDenied("required MFA not satisfied")
         return VerifiedOIDCSubject(
             issuer=config.issuer, subject=sub, audience=config.client_id,
             authenticated_at=issued_at, expires_at=expires_at,
-            mfa_satisfied=has_mfa,
+            mfa_satisfied=has_mfa, authentication_time=auth_time,
         )
     except AuthenticationDenied:
         raise
