@@ -18,6 +18,7 @@ from urllib.parse import urlsplit, urlencode
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .oidc import OIDCConfig
+from jwt.algorithms import RSAAlgorithm
 from .oidc_flow import OIDCLoginFlow, OIDCLoginSettings, LoginStore
 
 MAX_JSON_BYTES = 131_072
@@ -134,6 +135,10 @@ class VerifiedProviderClient:
                     or not SAFE_SEGMENT.fullmatch(item["kid"])
                     or item["kid"] in kids):
                 raise ProviderUnavailable("unusable or ambiguous provider signing keys")
+            try:
+                RSAAlgorithm.from_jwk(item)
+            except (ValueError, TypeError, KeyError):
+                raise ProviderUnavailable("invalid provider RSA public signing key") from None
             kids.add(item["kid"])
         if len(kids) > 32:
             raise ProviderUnavailable("provider published too many signing keys")
@@ -206,4 +211,5 @@ class VerifiedProviderClient:
             ),
             store,
             self.exchange_code,
+            refresh_jwks=self.fetch_trusted_jwks,
         )
