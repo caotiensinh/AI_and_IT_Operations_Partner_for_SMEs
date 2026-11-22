@@ -37,12 +37,13 @@ class FreshStepupVerifierTests(unittest.TestCase):
                           algorithm="RS256",headers={"kid":"pinned"})
 
     def verify(self, claims=None, token=None, **kwargs):
+        clock = kwargs.pop("now", self.now)
         return verify_fresh_stepup(
             token or self.sign(claims),self.config,
             expected_issuer="https://id.example",
             expected_subject="owner-123",
             expected_nonce=self.nonce,
-            now=self.now,**kwargs)
+            now=clock,**kwargs)
 
     def denied(self, claims=None, token=None, **kwargs):
         with self.assertRaises(AuthenticationDenied):
