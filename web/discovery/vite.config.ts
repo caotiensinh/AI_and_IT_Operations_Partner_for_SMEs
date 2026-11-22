@@ -16,7 +16,10 @@ export default defineConfig(({mode})=>{
     }:undefined,
     proxy:target?{
       "/v1":{target,changeOrigin:false},
-      "/auth":{target,changeOrigin:false}
+      "/auth":{target,changeOrigin:false},
+      ...(env.DISCOVERY_SYNTHETIC_IDP_ORIGIN?{
+        "/oidc-test":{target:env.DISCOVERY_SYNTHETIC_IDP_ORIGIN,changeOrigin:false}
+      }:{})
     }:undefined
   }};
 });
