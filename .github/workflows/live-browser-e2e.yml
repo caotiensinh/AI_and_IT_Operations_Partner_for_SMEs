@@ -37,6 +37,8 @@ jobs:
       SME_E2E_FIXTURE_MODE: disposable_ci_only
       SME_E2E_FIXTURE_PATH: /tmp/sme-browser-fixture.json
       PYTHONPATH: src
+      SME_E2E_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/browser
+      CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -71,6 +73,27 @@ jobs:
       - name: Browser cross-tenant tests
         run: node tests/browser_e2e.mjs
         working-directory: frontend
+      - name: Upload real-browser synthetic fixture screenshots
+        id: screenshot_archive
+        if: always()
+        # Storage quota is an external evidence blocker, not a browser test failure.
+        # Never equate a green browser job with persisted screenshots.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: sme-real-browser-synthetic-ci-evidence
+          path: evidence/browser/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Report evidence archival result
+        if: always()
+        run: |
+          if [ "${{ steps.screenshot_archive.outcome }}" != "success" ]; then
+            echo "::warning::Browser assertions ran, but screenshot evidence could not be archived. UI acceptance remains IN_PROGRESS; no L4/L5 claim."
+            echo "EVIDENCE_ARCHIVE=FAILED — No durable UI screenshots; approval prohibited." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "EVIDENCE_ARCHIVE=UPLOADED — Review images and SHA independently before any acceptance." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Diagnostics on failure
         if: failure()
-        run: tail -100 /tmp/sme-api.log /tmp/sme-ui.log || true
+        run: tail -n 100 /tmp/sme-api.log /tmp/sme-ui.log || true

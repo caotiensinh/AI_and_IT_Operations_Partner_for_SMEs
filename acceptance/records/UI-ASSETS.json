@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "status": "IN_PROGRESS",
+  "level": "L1",
+  "environment": "staging",
+  "commit_sha": "b5b0ec8970f71d727f3244a2a4ca2ff848725cc5",
+  "owner": "implementation-team",
+  "gates": {
+    "contract": true,
+    "persist": true,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "id": "UI-ASSETS",
+  "title": "Tenant-scoped asset inventory",
+  "scope": "Assets screen lists only assets accessible to selected tenant and handles empty/error states",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "Tenant has multiple authorized assets",
+      "when": "User visits Assets",
+      "then": "Backend-backed names, IDs and site IDs match authorized API exactly",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-02",
+      "given": "A user is denied cross-tenant access",
+      "when": "User attempts a foreign tenant asset request",
+      "then": "Server rejects request and UI does not leak data",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-03",
+      "given": "Tenant has zero assets",
+      "when": "User loads Assets",
+      "then": "Accurate empty state shown without fabricated entries",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-04",
+      "given": "Browser runs at 390px and 1440px",
+      "when": "User navigates and reviews Assets",
+      "then": "Rows and actions remain accessible, keyboard navigation works",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "blockers": [
+    "No real staging database/API/UI browser test evidence",
+    "No cross-tenant denial screenshot/log tied to the screen",
+    "No user acceptance and persistent restart test"
+  ]
+}
