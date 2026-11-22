@@ -48,26 +48,33 @@ test("complete OIDC browser code + PKCE + RS256 → cookie tenant → logout →
   await expect(page.getByRole("button",{name:new RegExp(label)})).toBeVisible();
 });
 
-test("provider state/code replay is rejected with no new authenticated session",async({page,context})=>{
+test("replaying an already consumed authorization state and code is rejected",async({page,context})=>{
+  let callback="";
+  page.on("request",req=>{
+    if(req.url().includes("/auth/oidc/callback?") && !callback)callback=req.url();
+  });
   await page.goto("/");
-  const first=await context.request.get("/auth/oidc/start",{maxRedirects:0});
-  expect(first.status()).toBe(302);
-  const url=first.headers()["location"];
-  expect(url).toContain("code_challenge_method=S256");
-  expect(url).toContain("state=");
-  // Browser follows the authorization endpoint on the same HTTPS test origin.
-  await page.goto(url);
+  await page.getByRole("link",{name:"安全にログインする"}).click();
   await expect(page.getByRole("button",{name:"Synthetic test tenant"})).toBeVisible();
-  const cookies=await context.cookies();
-  const session=cookies.find(c=>c.name==="__Host-sme_session");
-  expect(session).toBeDefined();
-  const callbackRequests:string[]=[];
-  page.on("request",req=>{if(req.url().includes("/auth/oidc/callback?"))callbackRequests.push(req.url());});
-  // After the first login succeeds, a fresh browser start/IdP roundtrip is
-  // required. Reusing the prior transaction cannot issue another session.
-  await page.goto("/");
-  await page.getByRole("button",{name:"Synthetic test tenant"}).click();
-  const after=await context.request.get("/auth/session/tenants");
-  expect(after.status()).toBe(200);
-  expect(callbackRequests.length).toBe(0); // no implicit new login transaction
+  expect(callback).toContain("state=");
+  expect(callback).toContain("code=");
+  const initialSession=(await context.cookies()).find(c=>c.name==="__Host-sme_session");
+  expect(initialSession).toBeDefined();
+
+  // Reuse the same state+code with an already-cleared browser binding.
+  const replay=await context.request.get(callback,{maxRedirects:0});
+  expect(replay.status()).toBe(401);
+  const stillValid=await context.request.get("/auth/session/tenants");
+  expect(stillValid.status()).toBe(200);
+
+  // Confirm a forged callback cannot mint a new session after logout.
+  const csrf=(await stillValid.json()).csrf_token as string;
+  const logout=await context.request.post("/auth/session/logout",{
+    headers:{"Origin":"https://127.0.0.1:5174","X-CSRF-Token":csrf}
+  });
+  expect(logout.status()).toBe(204);
+  expect((await context.request.get("/auth/session/tenants")).status()).toBe(401);
+  const secondReplay=await context.request.get(callback,{maxRedirects:0});
+  expect(secondReplay.status()).toBe(401);
+  expect((await context.request.get("/auth/session/tenants")).status()).toBe(401);
 });
