@@ -90,6 +90,8 @@ jobs:
           for file in migrations/0005_discovery_read_model.sql migrations/0008_discovery_read_model.sql migrations/0008_discovery_source_intake.sql; do
             if test -f "$file"; then echo "PRESENT $file"; else echo "ABSENT $file"; fi
           done
+          SME_STAGING_RECONCILE=1 python scripts/reconcile_staging_migrations.py
+          git add -A
           echo 'STAGING_MERGE_TREE_READY=1' >> "$GITHUB_ENV"
       - name: Install backend and run real PostgreSQL full regression on merged workspace
         shell: bash
