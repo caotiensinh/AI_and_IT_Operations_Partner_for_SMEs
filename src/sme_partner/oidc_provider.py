@@ -14,7 +14,7 @@ import re
 import ssl
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit, urlencode
+from urllib.parse import urlsplit, urlencode, quote_plus
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .oidc import OIDCConfig
@@ -158,11 +158,14 @@ class VerifiedProviderClient:
         ):
             if document.get(key) != expected:
                 raise ProviderUnavailable("provider metadata differs from pinned configuration")
-        if "code" not in document.get("response_types_supported", []):
+        if (not isinstance(document.get("response_types_supported"), list)
+                or "code" not in document["response_types_supported"]):
             raise ProviderUnavailable("provider does not support authorization code")
-        if "RS256" not in document.get("id_token_signing_alg_values_supported", []):
+        if (not isinstance(document.get("id_token_signing_alg_values_supported"), list)
+                or "RS256" not in document["id_token_signing_alg_values_supported"]):
             raise ProviderUnavailable("provider RS256 support missing")
-        if "S256" not in document.get("code_challenge_methods_supported", []):
+        if (not isinstance(document.get("code_challenge_methods_supported"), list)
+                or "S256" not in document["code_challenge_methods_supported"]):
             raise ProviderUnavailable("provider PKCE S256 support missing")
 
     def exchange_code(self, code: str, verifier: str, redirect_uri: str,
@@ -174,7 +177,7 @@ class VerifiedProviderClient:
             raise ProviderUnavailable("invalid authorization code exchange")
         # A client secret is only sent to the operator-pinned HTTPS token URL.
         credentials = base64.b64encode(
-            (client_id + ":" + self.settings.client_secret).encode("utf-8")
+            (quote_plus(client_id) + ":" + quote_plus(self.settings.client_secret)).encode("ascii")
         ).decode("ascii")
         form = urlencode({
             "grant_type":"authorization_code",
