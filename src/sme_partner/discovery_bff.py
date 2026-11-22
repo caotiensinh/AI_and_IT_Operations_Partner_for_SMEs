@@ -16,6 +16,8 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from .discovery_api import create_discovery_app
+from .oidc_browser import BrowserLoginSettings, create_oidc_browser_app
+from .oidc_flow import OIDCLoginFlow
 from .session_api import TOKEN_RE
 
 _SESSION_COOKIE = "__Host-sme_session"
@@ -35,13 +37,18 @@ def _trusted_origin(origin: str) -> str:
 
 def create_cookie_discovery_app(
     connect: Callable[[], psycopg.Connection], *, csrf_secret: bytes,
-    trusted_origin: str,
+    trusted_origin: str, oidc_flow: OIDCLoginFlow | None = None,
 ):
     """Create a cookie-only BFF. The legacy bearer-only API is unchanged elsewhere."""
     origin = _trusted_origin(trusted_origin)
     if not isinstance(csrf_secret, bytes) or len(csrf_secret) < 32:
         raise ValueError("CSRF HMAC key must be at least 32 unpredictable bytes")
     app = create_discovery_app(connect)
+    if oidc_flow is not None:
+        # The IdP exchange is server-configured and may never be supplied by a request.
+        app.include_router(create_oidc_browser_app(
+            oidc_flow, settings=BrowserLoginSettings(post_login_path="/")
+        ).router)
 
     def session_token(request: Request) -> str | None:
         token = request.cookies.get(_SESSION_COOKIE)
@@ -54,6 +61,10 @@ def create_cookie_discovery_app(
     @app.middleware("http")
     async def cookie_boundary(request: Request, call_next):
         path = request.url.path
+        if oidc_flow is not None and path in ("/auth/oidc/start", "/auth/oidc/callback"):
+            response = await call_next(request)
+            response.headers.update(_NO_STORE)
+            return response
         protected = path.startswith("/v1/tenants/") or path.startswith("/auth/session/")
         if not protected:
             # Do not accidentally publish unprotected endpoints on this BFF.
