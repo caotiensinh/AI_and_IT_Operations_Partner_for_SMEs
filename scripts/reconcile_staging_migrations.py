@@ -70,6 +70,23 @@ def main() -> None:
         if not source.is_file() or target.exists():
             raise RuntimeError(f"Unexpected staging migration state: {before}")
         source.rename(target)
+    # Main's 0006 tenant selector has RETURNS TABLE(..., display_name),
+    # whereas Discovery BFF's new selector uses tenant_label and LIMIT 101.
+    # PostgreSQL disallows CREATE OR REPLACE with a changed OUT signature.
+    # Preserve the main API and give the browser selector a distinct name.
+    for relative in (
+        "migrations/0026_cookie_bff_tenants.sql",
+        "src/sme_partner/discovery_bff.py",
+        "src/sme_partner/oidc_preflight.py",
+        "tests/test_oidc_preflight.py",
+    ):
+        file = ROOT / relative
+        original = file.read_text()
+        if "list_session_tenants" not in original:
+            raise RuntimeError(f"Missing expected browser tenant selector reference: {relative}")
+        file.write_text(original.replace(
+            "list_session_tenants", "list_browser_session_tenants"
+        ))
     for path in (ROOT / "tests").glob("*.py"):
         _replace_references(path)
     # The original Discovery test uses an obsolete contiguous migration list.
