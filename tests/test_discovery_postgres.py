@@ -31,7 +31,8 @@ class DiscoveryPostgresTests(unittest.TestCase):
                      "0008_discovery_source_intake.sql",
                      "0009_discovery_requirement_intake.sql",
                      "0010_discovery_requirement_review.sql",
-                     "0011_discovery_review_history_read.sql"):
+                     "0011_discovery_review_history_read.sql",
+                     "0012_cookie_bff_tenants.sql"):
             cls.db.execute((ROOT / "migrations" / name).read_text())
         cls.a, cls.b, cls.sa, cls.sb, cls.ia, cls.ib, cls.ca, cls.cb = [uuid4() for _ in range(8)]
         cls.token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
@@ -934,3 +935,87 @@ class DiscoveryPostgresTests(unittest.TestCase):
                             (self.a,other_case))
             self.db.execute("DELETE FROM sme.sites WHERE tenant_id=%s AND id=%s",
                             (self.a,other_site))
+
+    def test_cookie_bff_session_tenant_scope_and_csrf(self):
+        from sme_partner.discovery_bff import create_cookie_discovery_app
+        from fastapi.testclient import TestClient
+        app=create_cookie_discovery_app(
+            lambda: psycopg.connect(DSN),
+            csrf_secret=b"synthetic-ci-only-csrf-secret-not-for-customer!",
+            trusted_origin="https://pilot.test"
+        )
+        with TestClient(app,base_url="https://pilot.test",follow_redirects=False) as browser:
+            self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+            # An untrusted Authorization header never substitutes for session cookies.
+            self.assertEqual(browser.get("/v1/tenants/%s/research-cases" % self.a,
+                headers={"Authorization":f"Bearer {self.token}"}).status_code,401)
+            browser.cookies.set("__Host-sme_session",self.token,domain="pilot.test",path="/")
+            t=browser.get("/auth/session/tenants")
+            self.assertEqual(t.status_code,200,t.text)
+            self.assertEqual(t.json()["tenants"],[{"id":str(self.a),"label":"Research A"}])
+            self.assertNotIn(self.token,t.text)
+            csrf=t.json()["csrf_token"]
+            self.assertEqual(len(csrf),64)
+            cases=browser.get(f"/v1/tenants/{self.a}/research-cases")
+            self.assertEqual(cases.status_code,200,cases.text)
+            self.assertEqual(len(cases.json()["cases"]),1)
+            self.assertEqual(browser.get(
+                f"/v1/tenants/{self.b}/research-cases").status_code,403)
+            self.assertEqual(browser.get("/v1/session/logout").status_code,404)
+            self.assertEqual(browser.post("/auth/session/logout").status_code,403)
+            self.assertEqual(browser.post("/auth/session/logout",headers={
+                "Origin":"https://attacker.example","X-CSRF-Token":csrf
+            }).status_code,403)
+            self.assertEqual(browser.post("/auth/session/logout",headers={
+                "Origin":"https://pilot.test","X-CSRF-Token":"0"*64
+            }).status_code,403)
+            self.assertEqual(browser.post("/auth/session/logout",headers={
+                "Origin":"https://pilot.test","X-CSRF-Token":csrf,
+                "Authorization":f"Bearer {self.token}"
+            }).status_code,400)
+            # State remains active after all failed attempts; logout requires both signals.
+            self.assertEqual(browser.get("/auth/session/tenants").status_code,200)
+            result=browser.post("/auth/session/logout",headers={
+                "Origin":"https://pilot.test","X-CSRF-Token":csrf
+            })
+            self.assertEqual(result.status_code,204,result.text)
+            self.assertIn("Max-Age=0",result.headers.get("set-cookie",""))
+            self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+
+    def test_cookie_bff_scope_revocation_and_no_forged_tenant(self):
+        from sme_partner.discovery_bff import create_cookie_discovery_app
+        from fastapi.testclient import TestClient
+        browser_app=create_cookie_discovery_app(
+            lambda: psycopg.connect(DSN),
+            csrf_secret=b"synthetic-ci-only-csrf-secret-not-for-customer!",
+            trusted_origin="https://pilot.test"
+        )
+        # Fresh independent login token to avoid mutations across tests.
+        token=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        sid=uuid4()
+        self.db.execute("INSERT INTO sme.sessions(id,identity_id,token_digest,expires_at) "
+                        "VALUES (%s,%s,%s,%s)",(sid,self.ia,hashlib.sha256(token.encode()).digest(),
+                        datetime.now(timezone.utc)+timedelta(hours=1)))
+        try:
+            with TestClient(browser_app,base_url="https://pilot.test") as browser:
+                browser.cookies.set("__Host-sme_session",token,domain="pilot.test",path="/")
+                self.assertEqual(browser.get("/auth/session/tenants").status_code,200)
+                self.db.execute("UPDATE sme.memberships SET status='disabled' "
+                                "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+                self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+                self.assertEqual(browser.get(
+                    f"/v1/tenants/{self.a}/research-cases").status_code,403)
+        finally:
+            self.db.execute("UPDATE sme.memberships SET status='active' "
+                            "WHERE tenant_id=%s AND identity_id=%s",(self.a,self.ia))
+            self.db.execute("DELETE FROM sme.sessions WHERE id=%s",(sid,))
+
+    def test_cookie_bff_config_is_fail_closed(self):
+        from sme_partner.discovery_bff import create_cookie_discovery_app
+        for origin in ("http://pilot.test","https://pilot.test/unsafe",
+                       "https://pilot.test?x=1","https://user@pilot.test"):
+            with self.subTest(origin=origin),self.assertRaises(ValueError):
+                create_cookie_discovery_app(lambda:None,csrf_secret=b"x"*32,
+                                             trusted_origin=origin)
+        with self.assertRaises(ValueError):
+            create_cookie_discovery_app(lambda:None,csrf_secret=b"weak",trusted_origin="https://pilot.test")
