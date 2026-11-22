@@ -81,6 +81,17 @@ def _safe_spec(data: dict) -> tuple[str, list[dict], dict]:
             or not all(isinstance(x, str) and 1 <= len(x) <= 120
                        for x in terminal["workflows"])):
         raise GateError("Terminal PR and required CI workflow policy invalid")
+    foundation=data.get("foundation")
+    if (not isinstance(foundation,dict)
+        or type(foundation.get("merged_pr")) is not int
+        or foundation["merged_pr"]<1
+        or not isinstance(foundation.get("head"),str)
+        or not _SHA.fullmatch(foundation["head"])
+        or not isinstance(foundation.get("merge_commit"),str)
+        or not _SHA.fullmatch(foundation["merge_commit"])
+        or foundation.get("base_branch") != nodes[0]["base"]
+        or foundation["merged_pr"] in seen):
+        raise GateError("Merged foundation PR evidence is required and must match the first branch")
     return repo, nodes, terminal
 
 
@@ -90,6 +101,29 @@ def evaluate(manifest: dict, reader: GitHubReader) -> dict:
     checks: list[dict] = []
     def emit(name: str, ok: bool, reason: str) -> None:
         checks.append({"check": name, "passed": bool(ok), "detail": reason})
+    foundation=manifest["foundation"]
+    try:
+        parent=reader.get(f"/repos/{repo}/pulls/{foundation['merged_pr']}")
+        merged=(parent.get("state")=="closed"
+                and bool(parent.get("merged_at"))
+                and parent.get("merge_commit_sha")==foundation["merge_commit"]
+                and parent.get("head",{}).get("sha")==foundation["head"]
+                and parent.get("head",{}).get("ref")==foundation["base_branch"])
+        emit("foundation.merged_pr",merged,
+             "Pinned foundation PR merged" if merged else
+             "Merged foundation PR differs from pinned evidence")
+    except (GateError,KeyError,TypeError,ValueError):
+        emit("foundation.merged_pr",False,"Foundation PR evidence inaccessible")
+    try:
+        baseline=reader.get(
+            f"/repos/{repo}/compare/{foundation['merge_commit']}...main?per_page=1")
+        ancestor=(baseline.get("status") in ("ahead","identical")
+                  and baseline.get("behind_by")==0)
+        emit("foundation.main_ancestor",ancestor,
+             "Pinned foundation merge commit is an ancestor of current main"
+             if ancestor else "Foundation merge commit not verified in current main")
+    except (GateError,KeyError,TypeError,ValueError):
+        emit("foundation.main_ancestor",False,"Main ancestry evidence unavailable")
     prior = None
     for node in nodes:
         n = node["number"]
@@ -111,6 +145,11 @@ def evaluate(manifest: dict, reader: GitHubReader) -> dict:
             emit(f"pr.{n}.state", correct,
                  "Pinned source, same repository, open and mergeable"
                  if correct else "PR changed, unavailable, conflicted or not open")
+            if prior is None:
+                origin = target == foundation["base_branch"]
+                emit(f"pr.{n}.foundation",origin,
+                     "First open PR is based on pinned foundation branch"
+                     if origin else "First PR foundation branch mismatch")
             if prior is not None:
                 aligned = target == prior["ref"] and target_sha == prior["sha"]
                 emit(f"pr.{n}.parent", aligned,
