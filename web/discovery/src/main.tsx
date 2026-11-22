@@ -44,10 +44,20 @@ function App(){
   const client=useMemo(()=>connected?new DiscoveryClient({tenantId:tenant,...(BROWSER_COOKIE_MODE?{csrfToken}:{token})}):null,[connected,tenant,token,csrfToken]);
 
   const resetCase=()=>{setSelected(null);setRequirements([]);setReqCursor(null);setActiveReq(null);setHistory(null);setSources([]);setSourceCursor(null);};
-  function disconnect(){if(BROWSER_COOKIE_MODE && csrfToken){
-      void logoutBrowserSession(csrfToken).catch(()=>setError("ログアウトに失敗しました。"));
+  function disconnect(){
+    const clear=()=>{
+      setConnected(false);setToken("");setCsrfToken("");setTenantChoices([]);
+      setCases([]);setSites([]);setSiteCursor(null);setCaseCursor(null);
+      resetCase();setNotice("");setError("");
+      pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;
+    };
+    if(BROWSER_COOKIE_MODE){
+      if(!csrfToken){setError("セッション状態を確認できません。");return;}
+      void run(async()=>{await logoutBrowserSession(csrfToken);clear();});
+      return;
     }
-    setConnected(false);setToken("");setCsrfToken("");setTenantChoices([]);setCases([]);setSites([]);setSiteCursor(null);setCaseCursor(null);resetCase();setNotice("");setError("");pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;}
+    clear();
+  }
   async function run(task:()=>Promise<void>){
     if(busy)return;setBusy(true);setError("");setNotice("");
     try{await task();}catch(e){setError(e instanceof Error?e.message:"処理に失敗しました。");}
