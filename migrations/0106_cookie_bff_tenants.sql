@@ -1,3 +1,4 @@
+-- Canonical integrated staging namespace: Discovery 0100-0106; main/Asahi 0001-0021.
 -- Integrated staging canonical migration 0026 (main 0001-0019, Discovery 0020-0026).
 -- Browser BFF tenant selector: server-verified session, no user-provided tenant grants.
 BEGIN;
