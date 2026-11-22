@@ -15,16 +15,16 @@ MIGRATIONS = ROOT / "migrations"
 class StagingSchemaContractTests(unittest.TestCase):
     def test_unique_ordered_migrations_0001_through_0026(self):
         names = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
-        self.assertEqual(len(names), 26)
+        self.assertEqual(len(names), 28)
         numbers = [int(name.split("_", 1)[0]) for name in names]
-        self.assertEqual(numbers, list(range(1, 27)))
+        self.assertEqual(numbers, list(range(1, 22)) + list(range(100, 107)))
         self.assertIn("0008_discovery_read_model.sql", names)
-        self.assertIn("0020_discovery_case_write.sql", names)
-        self.assertIn("0026_cookie_bff_tenants.sql", names)
+        self.assertIn("0100_discovery_case_write.sql", names)
+        self.assertIn("0106_cookie_bff_tenants.sql", names)
 
     def test_main_and_cookie_selectors_have_separate_contracts(self):
         main = (MIGRATIONS / "0006_tenant_selector.sql").read_text()
-        cookie = (MIGRATIONS / "0026_cookie_bff_tenants.sql").read_text()
+        cookie = (MIGRATIONS / "0106_cookie_bff_tenants.sql").read_text()
         self.assertIn("FUNCTION sme.list_session_tenants(", main)
         self.assertIn("display_name text", main)
         self.assertIn("FUNCTION sme.list_browser_session_tenants(", cookie)

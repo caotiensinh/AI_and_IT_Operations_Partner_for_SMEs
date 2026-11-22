@@ -25,7 +25,7 @@ class DiscoveryPostgresTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.db = psycopg.connect(DSN, autocommit=True)
-        for number in (1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22, 23, 24, 25, 26):
+        for number in (1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 101, 102, 103, 104, 105, 106):
             matches = list((ROOT / "migrations").glob(f"{number:04d}_*.sql"))
             if len(matches) != 1:
                 raise RuntimeError(f"Non-unique migration {number:04d}")

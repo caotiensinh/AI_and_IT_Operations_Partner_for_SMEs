@@ -21,7 +21,7 @@ class PreflightDatabaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.owner=psycopg.connect(DSN,autocommit=True)
-        for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22, 23, 24, 25, 26):
+        for n in (1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 101, 102, 103, 104, 105, 106):
             files=list((ROOT/"migrations").glob(f"{n:04d}_*.sql"))
             if len(files)!=1:
                 raise RuntimeError("Expected one migration")
