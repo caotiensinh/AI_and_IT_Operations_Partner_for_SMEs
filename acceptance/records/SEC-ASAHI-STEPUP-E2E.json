@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "SEC-ASAHI-STEPUP-E2E",
+  "title": "Asahi owner MFA approval and audit with independent PostgreSQL logins",
+  "status": "IN_PROGRESS",
+  "level": "L2",
+  "scope": "Signed synthetic OIDC IdP through HTTPS-origin TestClient, Postgres 16 two-password login challenge, proof and approval audit; excludes public HTTPS ingress, customer IdP and delivery.",
+  "environment": "disposable PostgreSQL 16 GitHub Actions CI (synthetic ID token; not deployed HTTPS staging)",
+  "commit_sha": "102a335cb75c71340055f6704f0dde9e96c2825a",
+  "owner": "implementation-team",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "Active tenant owner session and fresh RS256 signed synthetic MFA token",
+      "when": "Browser BFF starts OIDC flow and completes callback",
+      "then": "Approval policy created once using dedicated issuer and approver PostgreSQL login credentials; audit operation 'created' is persisted",
+      "verified": true,
+      "evidence": [
+        "https://github.com/caotiensinh/AI_and_IT_Operations_Partner_for_SMEs/commit/102a335cb75c71340055f6704f0dde9e96c2825a/checks"
+      ]
+    },
+    {
+      "id": "AC-02",
+      "given": "Approved delivery policy and fresh signed synthetic MFA",
+      "when": "Owner initiates revoke and completes callback",
+      "then": "Policy disabled with one 'revoked' audit operation",
+      "verified": true,
+      "evidence": [
+        "https://github.com/caotiensinh/AI_and_IT_Operations_Partner_for_SMEs/pull/73"
+      ]
+    },
+    {
+      "id": "AC-03",
+      "given": "Invalid MFA, stale auth_time, forged state/tenant or revoked session",
+      "when": "Adversarial callback is sent",
+      "then": "No unauthorized approval or audit record; cross-role privilege escalation rejected",
+      "verified": true,
+      "evidence": [
+        "https://github.com/caotiensinh/AI_and_IT_Operations_Partner_for_SMEs/commit/102a335cb75c71340055f6704f0dde9e96c2825a/checks"
+      ]
+    },
+    {
+      "id": "AC-04",
+      "given": "Real HTTPS staging with a registered external IdP and hardened dedicated DB/TLS credentials",
+      "when": "Tenant owner completes approval in real browser and restarts service",
+      "then": "Fresh MFA verified, persistent change survives restart and owner independently accepts the flow",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "gates": {
+    "contract": true,
+    "persist": true,
+    "functional": true,
+    "security": true,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "blockers": [
+    "No external IdP or real HTTPS ingress/PKCE browser login has been exercised",
+    "No distributed throttling, production-grade secrets, verified PostgreSQL TLS or restart/rollback acceptance",
+    "No durable approved browser screenshots or independent owner sign-off"
+  ]
+}
