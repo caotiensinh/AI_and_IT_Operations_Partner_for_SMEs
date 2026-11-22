@@ -18,7 +18,7 @@ class PublicSafetyTests(unittest.TestCase):
 
     def test_rejects_private_key_and_embedded_token(self):
         self.assertIn("private key block",guard.inspect(
-            "docs/example.txt",b"-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"))
+            "docs/example.txt",b"-----BEGIN " + b"PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"))
         self.assertIn("credential-looking token",guard.inspect(
             "README.md",b"token = ghp_" + b"a"*36))
 
