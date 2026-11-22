@@ -4,7 +4,7 @@
 
 **Architecture:** Business & Experience (L1) → Domain & Application Services (L2) → Platform & Infrastructure (L3).
 
-**Status:** Architecture baseline and Spec Kit proposal. No production application is implemented yet. All capabilities below are proposed and must pass acceptance tests before being described as operational.
+**Status:** Architecture and Spec Kit baseline. The Business Discovery/API, tenant security, Japanese Workspace and OIDC integration are implemented and validated **on stacked open feature PRs**, not yet merged into `main` or deployed to customers. Passing synthetic CI is not production readiness. Other modules below remain proposed until independently accepted.
 
 ## Principles
 
@@ -33,6 +33,9 @@
 - [Reusable SME interview and discovery worksheet](docs/research/sme-discovery-interview-template.md)
 - [Spec Kit 003: SME business needs and discovery](specs/003-sme-business-needs/spec.md)
 - [Spec Kit 003: implementation and research tasks](specs/003-sme-business-needs/tasks.md)
+- [Staging integration gate and safe release procedure](docs/architecture/discovery-staging-integration-gate.md)
+- [Pinned PR integration evidence snapshot](specs/003-sme-business-needs/integration-chain.json)
+- [Enterprise OIDC deployment preflight](docs/architecture/oidc-deployment-preflight.md)
 
 ## Proposed stack
 

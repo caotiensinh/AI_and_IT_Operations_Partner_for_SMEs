@@ -1,0 +1,89 @@
+name: Discovery HTTPS Cookie E2E
+on:
+  push:
+    paths:
+      - 'scripts/discovery_*e2e*.py'
+      - 'web/discovery/**'
+      - 'src/sme_partner/discovery_bff.py'
+      - 'src/sme_partner/discovery_api.py'
+      - 'migrations/**'
+      - '.github/workflows/discovery-cookie-https-e2e.yml'
+  pull_request:
+    paths:
+      - 'scripts/discovery_*e2e*.py'
+      - 'web/discovery/**'
+      - 'src/sme_partner/discovery_bff.py'
+      - 'src/sme_partner/discovery_api.py'
+      - 'migrations/**'
+      - '.github/workflows/discovery-cookie-https-e2e.yml'
+permissions:
+  contents: read
+jobs:
+  https-cookie:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sme_test
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@127.0.0.1:5432/sme_test
+      SME_E2E_ONLY: '1'
+      SME_E2E_COOKIE_MODE: '1'
+      SME_E2E_FIXTURE_PATH: /tmp/sme-discovery-cookie-e2e.json
+      DISCOVERY_API_ORIGIN: http://127.0.0.1:8001
+      DISCOVERY_TLS_CERT: /tmp/sme-cookie-e2e.pem
+      DISCOVERY_TLS_KEY: /tmp/sme-cookie-e2e.key
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Create disposable localhost TLS certificate
+        run: |
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout "$DISCOVERY_TLS_KEY" -out "$DISCOVERY_TLS_CERT" \
+            -subj '/CN=127.0.0.1' \
+            -addext 'subjectAltName=IP:127.0.0.1'
+          chmod 600 "$DISCOVERY_TLS_KEY"
+          python -c 'import secrets; print(secrets.token_hex(32))' > /tmp/sme-cookie-e2e-csrf.hex
+          chmod 600 /tmp/sme-cookie-e2e-csrf.hex
+      - name: Install Python API runtime
+        run: python -m pip install -e . 'psycopg[binary]>=3.2,<4' 'uvicorn>=0.30,<1'
+      - name: Provision synthetic PostgreSQL fixture through migration 0012
+        run: python scripts/discovery_e2e_seed.py
+      - name: Start BFF on localhost only
+        run: |
+          export SME_E2E_CSRF_KEY_HEX="$(cat /tmp/sme-cookie-e2e-csrf.hex)"
+          python scripts/discovery_cookie_e2e_server.py > /tmp/sme-cookie-e2e-api.log 2>&1 &
+          echo $! > /tmp/sme-cookie-e2e-api.pid
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8001/auth/session/tenants | grep -q 401; then exit 0; fi
+            sleep 1
+          done
+          tail -60 /tmp/sme-cookie-e2e-api.log >&2
+          exit 1
+      - name: Install frontend dependencies
+        working-directory: web/discovery
+        run: npm install --no-audit --no-fund
+      - name: Install Chromium
+        working-directory: web/discovery
+        run: npx playwright install --with-deps chromium
+      - name: Real HTTPS Chromium cookie-workspace tests
+        working-directory: web/discovery
+        run: npx playwright test --config=playwright.cookie.config.ts
+      - name: Destroy synthetic session, test TLS key, and API
+        if: always()
+        run: |
+          if [ -f /tmp/sme-cookie-e2e-api.pid ]; then kill "$(cat /tmp/sme-cookie-e2e-api.pid)" || true; fi
+          rm -f "$SME_E2E_FIXTURE_PATH" "$DISCOVERY_TLS_KEY" "$DISCOVERY_TLS_CERT" /tmp/sme-cookie-e2e-csrf.hex /tmp/sme-cookie-e2e-api.pid
