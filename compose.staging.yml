@@ -22,6 +22,8 @@ services:
       SME_RUNTIME_DB_PASSWORD: ${SME_RUNTIME_DB_PASSWORD:?missing}
       SME_INGEST_DB_PASSWORD: ${SME_INGEST_DB_PASSWORD:?missing}
       SME_DISPATCH_DB_PASSWORD: ${SME_DISPATCH_DB_PASSWORD:?missing}
+      SME_STEPUP_DB_PASSWORD: ${SME_STEPUP_DB_PASSWORD:?missing}
+      SME_APPROVAL_DB_PASSWORD: ${SME_APPROVAL_DB_PASSWORD:?missing}
     volumes:
       - ./migrations:/migrations:ro
       - ./deploy/staging:/deploy:ro
