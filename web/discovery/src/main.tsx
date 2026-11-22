@@ -1,12 +1,15 @@
 import React, {useEffect,useMemo,useRef,useState} from "react";
 import {createRoot} from "react-dom/client";
-import {Case,Requirement,ReviewHistory,Site,Source,DiscoveryClient,validUuid} from "./api";
+import {Case,Requirement,ReviewHistory,Site,Source,DiscoveryClient,validUuid,BROWSER_COOKIE_MODE,discoverBrowserSession,logoutBrowserSession,TenantChoice} from "./api";
 import "./style.css";
 
 const UUID_EMPTY="00000000-0000-4000-8000-000000000000";
 function App(){
   const [tenant,setTenant]=useState("");
   const [token,setToken]=useState("");
+  const [csrfToken,setCsrfToken]=useState("");
+  const [tenantChoices,setTenantChoices]=useState<TenantChoice[]>([]);
+  const [cookieReady,setCookieReady]=useState(!BROWSER_COOKIE_MODE);
   const [connected,setConnected]=useState(false);
   const [cases,setCases]=useState<Case[]>([]);
   const [caseCursor,setCaseCursor]=useState<string|null>(null);
@@ -38,10 +41,13 @@ function App(){
   const pendingCreate=useRef<{key:string;body:string}|null>(null);
   const pendingSource=useRef<{id:string;body:string}|null>(null);
   const pendingRequirement=useRef<{id:string;body:string}|null>(null);
-  const client=useMemo(()=>connected?new DiscoveryClient({tenantId:tenant,token}):null,[connected,tenant,token]);
+  const client=useMemo(()=>connected?new DiscoveryClient({tenantId:tenant,...(BROWSER_COOKIE_MODE?{csrfToken}:{token})}):null,[connected,tenant,token,csrfToken]);
 
   const resetCase=()=>{setSelected(null);setRequirements([]);setReqCursor(null);setActiveReq(null);setHistory(null);setSources([]);setSourceCursor(null);};
-  function disconnect(){setConnected(false);setToken("");setCases([]);setSites([]);setSiteCursor(null);setCaseCursor(null);resetCase();setNotice("");setError("");pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;}
+  function disconnect(){if(BROWSER_COOKIE_MODE && csrfToken){
+      void logoutBrowserSession(csrfToken).catch(()=>setError("ログアウトに失敗しました。"));
+    }
+    setConnected(false);setToken("");setCsrfToken("");setTenantChoices([]);setCases([]);setSites([]);setSiteCursor(null);setCaseCursor(null);resetCase();setNotice("");setError("");pendingCreate.current=null;pendingSource.current=null;pendingRequirement.current=null;}
   async function run(task:()=>Promise<void>){
     if(busy)return;setBusy(true);setError("");setNotice("");
     try{await task();}catch(e){setError(e instanceof Error?e.message:"処理に失敗しました。");}
@@ -66,6 +72,24 @@ function App(){
     const page=await api.requirements(caseId,cursor);
     setRequirements(previous=>cursor?[...previous,...page.requirements]:page.requirements);
     setReqCursor(page.next_cursor);
+  }
+  useEffect(()=>{
+    if(!BROWSER_COOKIE_MODE)return;
+    let active=true;
+    void discoverBrowserSession().then(session=>{
+      if(!active)return;
+      if(session){setTenantChoices(session.tenants);setCsrfToken(session.csrf_token);}
+    }).catch(e=>{if(active)setError(e instanceof Error?e.message:"接続できません。");})
+      .finally(()=>{if(active)setCookieReady(true);});
+    return ()=>{active=false;};
+  },[]);
+  function connectCookieTenant(uid:string){
+    if(!validUuid(uid)||!csrfToken)return;
+    const api=new DiscoveryClient({tenantId:uid,csrfToken});
+    void run(async()=>{
+      await Promise.all([loadCases(api),loadSites(api)]);
+      setTenant(uid);setConnected(true);resetCase();setNotice("接続しました。");
+    });
   }
   function connect(){
     if(!validUuid(tenant)||!token.trim()){setError("Tenant UUID とセッショントークンを入力してください。");return;}
@@ -166,20 +190,30 @@ function App(){
     <header className="topbar">
       <div className="brand"><span className="brand-mark">S</span><span><strong>SME Partner</strong><small>Business Discovery Workspace</small></span></div>
       <span className="environment">研究用 / Pilot</span>
-      {connected&&<div className="context"><small>Tenant</small><code>{tenant.slice(0,8)}…</code><button className="quiet" onClick={disconnect}>接続解除</button></div>}
+      {connected&&<div className="context"><small>Tenant</small><code>{tenant.slice(0,8)}…</code><button className="quiet" onClick={disconnect}>{BROWSER_COOKIE_MODE?"ログアウト":"接続解除"}</button></div>}
     </header>
     {!connected?<main className="login-layout"><div className="welcome">
       <span className="eyebrow">BUSINESS DISCOVERY</span><h1>事業課題を、根拠から整理する。</h1>
       <p>案件の登録、根拠資料の紐付け、要件の審査までを一つの画面で管理します。</p>
       <div className="info">この画面は研究用です。認可済みの同一オリジンAPIが必要です。顧客情報や本番トークンは投入しないでください。</div>
-    </div><form className="login-card" onSubmit={e=>{e.preventDefault();connect();}}>
+    </div>{BROWSER_COOKIE_MODE?<section className="login-card">
+      <h2>事業所の選択</h2>
+      {!cookieReady?<p role="status">セッションを確認しています…</p>:
+        tenantChoices.length===0?<><p>ログインしてから利用可能な事業所を選択してください。</p>
+          <a className="primary" href="/auth/oidc/start">安全にログインする</a></>:
+        <><p>アクセスを許可された事業所を選択してください。</p>
+          {tenantChoices.map(choice=><button className="case-button" type="button"
+            key={choice.id} onClick={()=>connectCookieTenant(choice.id)}>
+            <strong>{choice.label}</strong></button>)}</>}
+      {error&&<p className="error" role="alert">{error}</p>}
+    </section>:<form className="login-card" onSubmit={e=>{e.preventDefault();connect();}}>
       <h2>ワークスペースに接続</h2><p>Tenant と検証用セッションを指定します。</p>
       <label>Tenant UUID<input required value={tenant} onChange={e=>setTenant(e.target.value)} placeholder={UUID_EMPTY}/></label>
       <label>セッショントークン<input type="password" autoComplete="off" required value={token} onChange={e=>setToken(e.target.value)} placeholder="一時的な Bearer token"/></label>
       <button className="primary" disabled={busy} type="submit">接続する</button>
       <small className="muted">トークンはブラウザ内メモリにのみ保持し、保存しません。</small>
       {error&&<p className="error" role="alert">{error}</p>}
-    </form></main>:
+    </form>}</main>:
     <div className="workspace">
       <aside className="sidebar" aria-label="調査案件一覧">
         <div className="sidebar-title"><div><span className="eyebrow">WORKSPACE</span><h2>調査案件</h2></div><button className="primary small" onClick={()=>setShowCreate(v=>!v)}>＋ 新規</button></div>
