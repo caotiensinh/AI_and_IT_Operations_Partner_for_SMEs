@@ -1028,3 +1028,56 @@ class DiscoveryPostgresTests(unittest.TestCase):
                                              trusted_origin=origin)
         with self.assertRaises(ValueError):
             create_cookie_discovery_app(lambda:None,csrf_secret=b"weak",trusted_origin="https://pilot.test")
+
+    def test_cookie_bff_post_requires_csrf_and_preserves_db_idempotency(self):
+        from sme_partner.discovery_bff import create_cookie_discovery_app
+        from fastapi.testclient import TestClient
+        token=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        sid=uuid4()
+        key=secrets.token_urlsafe(24)
+        created=None
+        self.db.execute("INSERT INTO sme.sessions(id,identity_id,token_digest,expires_at) "
+                        "VALUES (%s,%s,%s,%s)",(sid,self.ia,hashlib.sha256(token.encode()).digest(),
+                        datetime.now(timezone.utc)+timedelta(hours=1)))
+        self._with_manager()
+        try:
+            app=create_cookie_discovery_app(
+                lambda: psycopg.connect(DSN),csrf_secret=b"synthetic-cookie-bff-test-secret-12345",
+                trusted_origin="https://pilot.test")
+            with TestClient(app,base_url="https://pilot.test") as browser:
+                browser.cookies.set("__Host-sme_session",token,domain="pilot.test",path="/")
+                bootstrap=browser.get("/auth/session/tenants")
+                self.assertEqual(bootstrap.status_code,200,bootstrap.text)
+                csrf=bootstrap.json()["csrf_token"]
+                url=f"/v1/tenants/{self.a}/research-cases"
+                payload={"site_id":str(self.sa),"label":"Cookie BFF synthetic case",
+                         "company_code":"OTHER"}
+                headers={"Idempotency-Key":key}
+                self.assertEqual(browser.post(url,json=payload,headers=headers).status_code,403)
+                self.assertEqual(browser.post(url,json=payload,headers={
+                    **headers,"Origin":"https://attacker.example",
+                    "X-CSRF-Token":csrf}).status_code,403)
+                self.assertEqual(browser.post(url,json=payload,headers={
+                    **headers,"Origin":"https://pilot.test",
+                    "X-CSRF-Token":"wrong"}).status_code,403)
+                valid={**headers,"Origin":"https://pilot.test","X-CSRF-Token":csrf}
+                first=browser.post(url,json=payload,headers=valid)
+                self.assertEqual(first.status_code,201,first.text)
+                created=first.json()["case_id"]
+                second=browser.post(url,json=payload,headers=valid)
+                self.assertEqual(second.status_code,200,second.text)
+                self.assertEqual(second.json()["case_id"],created)
+                self.assertTrue(second.json()["replayed"])
+                self.assertEqual(self.db.execute(
+                    "SELECT count(*) FROM sme.discovery_change_events "
+                    "WHERE tenant_id=%s AND case_id=%s",(self.a,created)).fetchone()[0],1)
+        finally:
+            if created:
+                self.db.execute("DELETE FROM sme.discovery_create_requests "
+                                "WHERE tenant_id=%s AND case_id=%s",(self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_change_events "
+                                "WHERE tenant_id=%s AND case_id=%s",(self.a,created))
+                self.db.execute("DELETE FROM sme.discovery_cases "
+                                "WHERE tenant_id=%s AND id=%s",(self.a,created))
+            self._restore_viewer()
+            self.db.execute("DELETE FROM sme.sessions WHERE id=%s",(sid,))
