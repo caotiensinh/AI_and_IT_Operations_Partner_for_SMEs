@@ -73,6 +73,10 @@ jobs:
       - name: Browser cross-tenant tests
         run: node tests/browser_e2e.mjs
         working-directory: frontend
+      - name: Verify 13 screenshot files against source SHA and manifest
+        run: |
+          python scripts/validate_browser_evidence.py evidence/browser --sha "$CI_SOURCE_SHA"
+          echo "CAPTURE_INTEGRITY=PASS; archive and independent review remain separate" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload real-browser synthetic fixture screenshots
         id: screenshot_archive
         if: always()
