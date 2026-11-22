@@ -91,6 +91,9 @@ jobs:
             if test -f "$file"; then echo "PRESENT $file"; else echo "ABSENT $file"; fi
           done
           SME_STAGING_RECONCILE=1 python scripts/reconcile_staging_migrations.py
+          grep -q 'CREATE OR REPLACE FUNCTION sme.list_browser_session_tenants' migrations/0026_cookie_bff_tenants.sql
+          grep -q 'CREATE OR REPLACE FUNCTION sme.list_session_tenants' migrations/0006_tenant_selector.sql
+          grep -q 'sme.list_browser_session_tenants' src/sme_partner/discovery_bff.py
           git add -A
           echo 'STAGING_MERGE_TREE_READY=1' >> "$GITHUB_ENV"
       - name: Install backend and run real PostgreSQL full regression on merged workspace
