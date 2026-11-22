@@ -43,9 +43,17 @@ def ingest_one(poller: AsahiHTTPSPoller, connect: Callable, auth: IngestAuthoriz
             # The connection MUST be the dedicated ingest login or an isolated
             # CI principal allowed to assume sme_ingest; never the web runtime.
             conn.execute("SET LOCAL ROLE sme_ingest")
-            return bool(conn.execute(
+            inserted = bool(conn.execute(
                 "SELECT sme.ingest_asahi_sample(%s,%s,%s,%s,%s::numeric,%s::numeric,%s::bigint)",
                 (auth.enrollment_id,credential_digest,sample.sampled_at,
                  sample.hostname,sample.cpu_percent,sample.memory_percent,
                  sample.uptime_seconds),
             ).fetchone()[0])
+            if inserted:
+                # Persist state + outbox in the very SAME DB transaction.
+                # A failure evaluating alerts rolls back the inserted sample.
+                conn.execute(
+                    "SELECT sme.evaluate_asahi_alert(%s,%s,%s)",
+                    (auth.enrollment_id,credential_digest,sample.sampled_at),
+                ).fetchone()
+            return inserted

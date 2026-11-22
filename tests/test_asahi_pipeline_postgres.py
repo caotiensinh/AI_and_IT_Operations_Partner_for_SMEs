@@ -3,7 +3,7 @@ import hashlib
 import os
 import secrets
 import unittest
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -79,6 +79,41 @@ class AsahiPollToDatabaseTests(unittest.TestCase):
         self.assertEqual(row[0:4],(self.a,self.site_a,self.device_a,"real-shape-agent"))
         self.assertEqual(tuple(float(x) for x in row[4:6]),(24.5,42.0))
         self.assertEqual(row[6],1500)
+    def test_high_cpu_polls_create_one_durable_alert(self):
+        auth=IngestAuthorization(self.enroll_a,self.token_a,DeviceBinding(self.a,self.site_a,self.device_a))
+        for step in (20,21):
+            when=self.time+timedelta(seconds=step)
+            payload={"hostname":"real-shape-agent","timestamp":int(when.timestamp()),
+                     "cpu_pct":96,"memory_pct":42,"uptime_s":1500,"disks":[]}
+            poller=self.build(tenant=self.a,site=self.site_a,device=self.device_a,payload=payload)
+            self.assertTrue(ingest_one(poller,self.connect,auth,when))
+            self.assertFalse(ingest_one(poller,self.connect,auth,when))
+        records=self.admin.execute(
+            "SELECT metric,transition FROM sme.asahi_alert_outbox "
+            "WHERE tenant_id=%s AND device_id=%s ORDER BY sampled_at",
+            (self.a,self.device_a)
+        ).fetchall()
+        self.assertEqual(records,[("cpu","triggered")])
+
+    def test_failed_alert_evaluation_rolls_back_sample(self):
+        when=self.time+timedelta(seconds=30)
+        payload={"hostname":"atomic","timestamp":int(when.timestamp()),
+                 "cpu_pct":99,"memory_pct":None,"uptime_s":200,"disks":[]}
+        poller=self.build(tenant=self.a,site=self.site_a,device=self.device_a,payload=payload)
+        auth=IngestAuthorization(self.enroll_a,self.token_a,DeviceBinding(self.a,self.site_a,self.device_a))
+        function="sme.evaluate_asahi_alert(uuid,bytea,timestamptz)"
+        self.admin.execute("REVOKE EXECUTE ON FUNCTION "+function+" FROM sme_ingest")
+        try:
+            with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                ingest_one(poller,self.connect,auth,when)
+            count=self.admin.execute(
+                "SELECT count(*) FROM sme.asahi_samples WHERE tenant_id=%s AND device_id=%s AND sampled_at=%s",
+                (self.a,self.device_a,when)
+            ).fetchone()[0]
+            self.assertEqual(count,0,"ingested sample must be rolled back when outbox evaluation fails")
+        finally:
+            self.admin.execute("GRANT EXECUTE ON FUNCTION "+function+" TO sme_ingest")
+
     def test_http_denied_does_not_persist(self):
         poller=self.build(tenant=self.b,site=self.site_b,device=self.device_b,status=401)
         auth=IngestAuthorization(self.enroll_b,self.token_b,DeviceBinding(self.b,self.site_b,self.device_b))
