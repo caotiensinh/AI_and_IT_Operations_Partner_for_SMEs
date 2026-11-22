@@ -39,7 +39,7 @@ class ApprovedDestination:
 @dataclass(frozen=True, slots=True)
 class DeliveryAuthorization:
     tenant_id: UUID
-    event_id: UUID
+    event_id: int
     channel: str
     destination_ref: str
     secret_ref: str
@@ -61,10 +61,10 @@ class TenantDeliveryPolicy:
             entries[tenant_id] = destination
         self._destinations = MappingProxyType(entries)
 
-    def authorize(self, *, tenant_id: UUID, event_id: UUID) -> DeliveryAuthorization:
+    def authorize(self, *, tenant_id: UUID, event_id: int) -> DeliveryAuthorization:
         if not isinstance(tenant_id, UUID) or tenant_id.int == 0:
             raise ValueError("invalid tenant")
-        if not isinstance(event_id, UUID) or event_id.int == 0:
+        if type(event_id) is not int or not 1 <= event_id <= 9223372036854775807:
             raise ValueError("invalid event")
         destination = self._destinations.get(tenant_id)
         if destination is None or not destination.enabled:

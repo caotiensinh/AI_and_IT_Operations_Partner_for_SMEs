@@ -8,7 +8,7 @@ from sme_partner.asahi_delivery_policy import (
 class DeliveryPolicyTests(unittest.TestCase):
     def setUp(self):
         self.tenant = uuid4()
-        self.event = uuid4()
+        self.event = 42
 
     def destination(self, **kwargs):
         params = dict(
@@ -24,6 +24,7 @@ class DeliveryPolicyTests(unittest.TestCase):
         auth = policy.authorize(tenant_id=self.tenant, event_id=self.event)
         self.assertEqual((auth.tenant_id, auth.event_id), (self.tenant, self.event))
         self.assertEqual(auth.idempotency_key, str(self.event))
+        self.assertEqual(auth.event_id, 42)
         self.assertEqual(auth.destination_ref, "tenant/mail/alerts")
         self.assertEqual(auth, policy.authorize(tenant_id=self.tenant, event_id=self.event))
 
@@ -50,8 +51,10 @@ class DeliveryPolicyTests(unittest.TestCase):
 
     def test_invalid_identifiers(self):
         policy = TenantDeliveryPolicy({self.tenant: self.destination()})
-        for tenant, event in ((UUID(int=0), self.event), (self.tenant, UUID(int=0)),
-                              ("x", self.event), (self.tenant, "x")):
+        for tenant, event in ((UUID(int=0), self.event), (self.tenant, 0),
+                              ("x", self.event), (self.tenant, "x"),
+                              (self.tenant, -1), (self.tenant, True),
+                              (self.tenant, 9223372036854775808), (self.tenant, uuid4())):
             with self.subTest(tenant=tenant, event=event), self.assertRaises(ValueError):
                 policy.authorize(tenant_id=tenant, event_id=event)
 
