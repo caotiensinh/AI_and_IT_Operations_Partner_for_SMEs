@@ -16,59 +16,15 @@ PNG_HEADER = b"\x89PNG\r\n\x1a\n"
 MAX_PNG_BYTES = 12 * 1024 * 1024
 
 def inspect(directory: Path, expected_sha: str):
-    if not SHA_RE.fullmatch(expected_sha):
-        raise ValueError("Expected source SHA must be exactly 40 lowercase hex characters")
+    """Require the canonical Spec 027 capture contract before packaging."""
+    from validate_browser_evidence import validate
+    validate(directory, expected_sha)
     root = directory.resolve(strict=True)
-    manifest_path = root / "manifest.json"
-    if manifest_path.is_symlink():
-        raise ValueError("Symlink manifest forbidden")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(manifest,dict) or set(manifest) != {"evidence_type","synthetic_data","idp","production_ready","source_sha","screens"}:
-        raise ValueError("Unexpected manifest schema")
-    if (manifest["evidence_type"] != "INTEGRATION_TEST_NOT_USER_ACCEPTANCE"
-        or manifest["synthetic_data"] is not True or manifest["production_ready"] is not False
-        or manifest["source_sha"] != expected_sha or not isinstance(manifest["idp"],str)
-        or "CI header-token bypass" not in manifest["idp"]):
-        raise ValueError("Untrusted manifest provenance")
-    screens = manifest["screens"]
-    if not isinstance(screens,list) or len(screens) != len(NAMES):
-        raise ValueError("Expected exactly 13 screenshot entries")
-    actual = set()
     checksums = {}
-    for entry in screens:
-        if not isinstance(entry,dict) or set(entry) != {"name","viewport","source"}:
-            raise ValueError("Unexpected screenshot entry")
-        name = entry["name"]
-        if not isinstance(name,str) or name not in NAMES or name in actual:
-            raise ValueError("Unknown or duplicate screenshot name")
-        actual.add(name)
-        size = entry["viewport"]
-        if not isinstance(size,dict) or set(size) != {"width","height"}:
-            raise ValueError("Invalid viewport")
-        expected = (390,844) if name=="unauthorized-390x844" else tuple(map(int,name.rsplit("-",1)[1].split("x")))
-        if type(size["width"]) is not int or type(size["height"]) is not int or (size["width"],size["height"]) != expected:
-            raise ValueError("Viewport mismatch")
-        if not isinstance(entry["source"],str) or "synthetic CI fixture" not in entry["source"]:
-            raise ValueError("Screenshot provenance required")
-        path = root / (name+".png")
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("Missing or symlinked screenshot: "+name)
-        if not 24 <= path.stat().st_size <= MAX_PNG_BYTES:
-            raise ValueError("Implausible screenshot size: "+name)
-        with path.open("rb") as stream:
-            header=stream.read(24)
-        if not header.startswith(PNG_HEADER):
-            raise ValueError("Invalid PNG signature: "+name)
-        actual_width=int.from_bytes(header[16:20],"big")
-        if actual_width != expected[0]:
-            raise ValueError("PNG image width differs from viewport: "+name)
-        checksums[name+".png"]=hashlib.sha256(path.read_bytes()).hexdigest()
-    if actual != NAMES:
-        raise ValueError("Incomplete screenshot set")
-    found = {p.name for p in root.iterdir()}
-    if found != set(checksums)|{"manifest.json"}:
-        raise ValueError("Unexpected files in evidence folder")
-    checksums["manifest.json"]=hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    for name in sorted(NAMES):
+        path = root / (name + ".png")
+        checksums[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    checksums["manifest.json"] = hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()
     return checksums
 
 def package(directory: Path, output: Path, expected_sha: str):
