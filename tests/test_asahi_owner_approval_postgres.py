@@ -236,6 +236,145 @@ class OwnerApprovalTests(unittest.TestCase):
                 "email","tenant/../unsafe","tenant/secret"))
         self.assertIsNone(self.issue("unknown",self.digest,self.tenant))
 
+    def stepup_identity(self, digest, tenant):
+        with psycopg.connect(DSN) as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE sme_stepup")
+                return conn.execute(
+                    "SELECT issuer,subject FROM sme.resolve_asahi_stepup_identity(%s,%s)",
+                    (digest,tenant),
+                ).fetchone()
+
+    def test_stepup_identity_lookup_matches_session_owner(self):
+        row = self.stepup_identity(self.digest,self.tenant)
+        self.assertEqual(row,("test",self.actor.hex))
+        self.assertIsNone(self.stepup_identity(self.other_digest,self.tenant))
+        self.assertIsNone(self.stepup_identity(self.digest,uuid4()))
+        self.assertIsNone(self.stepup_identity(os.urandom(32),self.tenant))
+
+    def test_stepup_identity_lookup_rechecks_revocation_and_role(self):
+        self.assertIsNotNone(self.stepup_identity(self.digest,self.tenant))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=now() WHERE token_digest=%s",
+                        (self.digest,))
+        self.assertIsNone(self.stepup_identity(self.digest,self.tenant))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=NULL WHERE token_digest=%s",
+                        (self.digest,))
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND id=%s",
+                        (self.tenant,self.role_id))
+        self.assertIsNone(self.stepup_identity(self.digest,self.tenant))
+
+    def test_stepup_identity_lookup_is_isolated_to_issuer_role(self):
+        for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch","sme_approval"):
+            with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                with psycopg.connect(DSN) as conn:
+                    with conn.transaction():
+                        conn.execute("SET LOCAL ROLE " + role)
+                        conn.execute("SELECT * FROM sme.resolve_asahi_stepup_identity(%s,%s)",
+                                     (self.digest,self.tenant)).fetchall()
+
+    def challenge_begin(self,state,browser=None,digest=None,tenant=None,
+                        action="approve",channel="email",
+                        destination="tenant/alerts",secret="tenant/secret"):
+        args=(state,browser if browser is not None else self.browser,
+              digest if digest is not None else self.digest,
+              tenant if tenant is not None else self.tenant,action,channel,
+              destination,secret,"v"*64,"n"*43)
+        return self.call("begin_asahi_stepup_challenge",*args,role="sme_stepup")
+
+    def challenge_consume(self,state,browser=None,digest=None,tenant=None,
+                          action="approve",channel="email",
+                          destination="tenant/alerts",secret="tenant/secret",
+                          role="sme_stepup"):
+        args=(state,browser if browser is not None else self.browser,
+              digest if digest is not None else self.digest,
+              tenant if tenant is not None else self.tenant,
+              action,channel,destination,secret)
+        with psycopg.connect(DSN) as conn:
+            with conn.transaction():
+                conn.execute("SET LOCAL ROLE " + role)
+                return conn.execute(
+                    "SELECT * FROM sme.consume_asahi_stepup_challenge("+
+                    ",".join("%s" for _ in args)+")",args
+                ).fetchone()
+
+    def test_browser_challenge_is_one_time_and_bound(self):
+        self.browser=os.urandom(32)
+        state=os.urandom(32)
+        self.assertTrue(self.challenge_begin(state))
+        self.assertIsNone(self.challenge_consume(state,browser=os.urandom(32)))
+        self.assertIsNone(self.challenge_consume(state,tenant=uuid4()))
+        self.assertIsNone(self.challenge_consume(state,action="revoke",
+                        channel=None,destination=None,secret=None))
+        self.assertIsNone(self.challenge_consume(state,destination="other/path"))
+        self.assertEqual(self.challenge_consume(state),("v"*64,"n"*43))
+        self.assertIsNone(self.challenge_consume(state))
+
+    def test_browser_challenge_rejects_revoked_session_and_expiration(self):
+        self.browser=os.urandom(32)
+        state=os.urandom(32)
+        self.assertTrue(self.challenge_begin(state))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=now() WHERE token_digest=%s",
+                        (self.digest,))
+        self.assertIsNone(self.challenge_consume(state))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=NULL WHERE token_digest=%s",
+                        (self.digest,))
+        self.db.execute(
+            "UPDATE sme.asahi_stepup_challenges SET created_at=now()-interval '6 minutes',"
+            " expires_at=now()-interval '1 minute' WHERE state_digest=%s",(state,)
+        )
+        self.assertIsNone(self.challenge_consume(state))
+
+    def test_browser_challenge_concurrent_consume_at_most_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        self.browser=os.urandom(32)
+        state=os.urandom(32)
+        self.assertTrue(self.challenge_begin(state))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes=list(pool.map(lambda _:self.challenge_consume(state),(1,2)))
+        self.assertEqual(sum(x is not None for x in outcomes),1)
+
+    def test_browser_challenge_restricted_roles(self):
+        self.browser=os.urandom(32)
+        state=os.urandom(32)
+        for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch","sme_approval"):
+            with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                self.challenge_consume(state,role=role)
+            with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                self.call("begin_asahi_stepup_challenge",state,self.browser,
+                          self.digest,self.tenant,"approve","email",
+                          "tenant/alerts","tenant/secret","v"*64,"n"*43,role=role)
+
+    def test_postgres_stepup_store_uses_persisted_challenge_and_proof(self):
+        from sme_partner.asahi_stepup_oidc_flow import PostgresStepupStore, StepupAction
+        store=PostgresStepupStore(lambda: psycopg.connect(DSN))
+        action=StepupAction(self.tenant,"approve","email",
+                            "tenant/alerts","tenant/secret")
+        state=os.urandom(32)
+        browser=os.urandom(32)
+        self.assertTrue(store.begin(
+            state_digest=state,browser_digest=browser,session_digest=self.digest,
+            action=action,verifier="v"*64,nonce="n"*43
+        ))
+        self.assertEqual(store.identity(self.digest,self.tenant),("test",self.actor.hex))
+        self.assertIsNone(store.consume(
+            state_digest=state,browser_digest=os.urandom(32),
+            session_digest=self.digest,action=action
+        ))
+        self.assertEqual(store.consume(
+            state_digest=state,browser_digest=browser,
+            session_digest=self.digest,action=action
+        ),("v"*64,"n"*43))
+        self.assertIsNone(store.consume(
+            state_digest=state,browser_digest=browser,
+            session_digest=self.digest,action=action
+        ))
+        proof=store.issue(session_digest=self.digest,action=action,lifetime=60)
+        self.assertIsNotNone(proof)
+        self.assertTrue(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+
     def test_runtime_roles_no_direct_access(self):
         for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch"):
             with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
