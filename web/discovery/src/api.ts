@@ -11,7 +11,22 @@ export type CasePage = Page<{cases:Case[]}>;
 export type SitePage = Page<{sites:Site[]}>;
 export type SourcePage = Page<{sources:Source[]}>;
 export type RequirementPage = Page<{requirements:Requirement[]}>;
-export type Config = {tenantId:string; token:string};
+export type Config = {tenantId:string; token?:string; csrfToken?:string};
+export type TenantChoice = {id:string;label:string};
+export type BrowserSession = {tenants:TenantChoice[];csrf_token:string};
+export const BROWSER_COOKIE_MODE = import.meta.env.VITE_DISCOVERY_AUTH_MODE === "cookie";
+export async function discoverBrowserSession():Promise<BrowserSession|null> {
+  const response=await fetch("/auth/session/tenants",{credentials:"same-origin",cache:"no-store"});
+  if(response.status===401)return null;
+  if(!response.ok)throw new Error(normalizeError(response.status));
+  return (await response.json()) as BrowserSession;
+}
+export async function logoutBrowserSession(csrfToken:string):Promise<void> {
+  const response=await fetch("/auth/session/logout",{method:"POST",credentials:"same-origin",
+    headers:{"X-CSRF-Token":csrfToken}});
+  if(!response.ok)throw new Error(normalizeError(response.status));
+}
+
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function validUuid(value:string):boolean { return UUID.test(value); }
@@ -29,8 +44,13 @@ export class DiscoveryClient {
     const response=await fetch("/v1/tenants/"+encodeURIComponent(this.config.tenantId)+route,{
       ...init,
       cache:"no-store",
-      headers:{"Authorization":"Bearer "+this.config.token,"Accept":"application/json",
-        ...(init.body?{"Content-Type":"application/json"}:{}),...init.headers}
+      credentials:"same-origin",
+      headers:{...(this.config.token?{"Authorization":"Bearer "+this.config.token}:{}),
+        "Accept":"application/json",
+        ...(init.body?{"Content-Type":"application/json"}:{}),
+        ...(init.method && !["GET","HEAD"].includes(init.method.toUpperCase()) && this.config.csrfToken?
+          {"X-CSRF-Token":this.config.csrfToken}:{}),
+        ...init.headers}
     });
     if(!response.ok) throw new Error(normalizeError(response.status));
     return (await response.json()) as T;
