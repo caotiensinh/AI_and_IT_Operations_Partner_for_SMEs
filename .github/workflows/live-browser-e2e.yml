@@ -37,6 +37,8 @@ jobs:
       SME_E2E_FIXTURE_MODE: disposable_ci_only
       SME_E2E_FIXTURE_PATH: /tmp/sme-browser-fixture.json
       PYTHONPATH: src
+      SME_E2E_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/browser
+      CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -71,6 +73,14 @@ jobs:
       - name: Browser cross-tenant tests
         run: node tests/browser_e2e.mjs
         working-directory: frontend
+      - name: Upload real-browser synthetic fixture screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sme-real-browser-synthetic-ci-evidence
+          path: evidence/browser/
+          retention-days: 14
+          if-no-files-found: warn
       - name: Diagnostics on failure
         if: failure()
         run: tail -100 /tmp/sme-api.log /tmp/sme-ui.log || true
