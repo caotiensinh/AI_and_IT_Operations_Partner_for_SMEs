@@ -43,6 +43,7 @@ def install_asahi_stepup_bff(
     # Must be a separately authorized sme_approval connection, not sme_stepup.
     apply_proof: Callable[[bytes, StepupAction, UUID], bool],
     enabled: bool = False,
+    production_preflight: Callable[[], None] | None = None,
 ) -> None:
     """Install gated BFF endpoints. Explicit opt-in remains disabled by default."""
     parsed = urlsplit(public_origin)
@@ -56,6 +57,11 @@ def install_asahi_stepup_bff(
         raise ValueError("enabled must be an explicit boolean")
     if not callable(session_active) or not callable(apply_proof):
         raise ValueError("trusted authorization callbacks required")
+    if enabled:
+        if not callable(production_preflight):
+            raise ValueError("enabled step-up requires deployment preflight")
+        # Fail before installing any routes; errors must prevent startup.
+        production_preflight()
     origin=public_origin.rstrip("/")
 
     def session(request: Request) -> tuple[str,bytes]:
