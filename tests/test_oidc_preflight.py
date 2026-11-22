@@ -25,7 +25,7 @@ class PreflightTests(unittest.TestCase):
 
     def test_offline_valid_config_passes_policy_and_local_checks_only(self):
         report=run_preflight(ready_env(),check_network=False,check_database=False)
-        self.assertTrue(report.ready,report.public_dict())
+        self.assertFalse(report.ready, "Offline probes are not deployment-ready")
         self.assertEqual(
             [x.name for x in report.checks],
             ["config.required","config.database_split","config.csrf",
@@ -35,11 +35,58 @@ class PreflightTests(unittest.TestCase):
     def test_all_check_ids_stable_with_pinned_provider_network(self):
         provider=HTTP()
         report=run_preflight(ready_env(),provider_http=provider,check_database=False)
-        self.assertTrue(report.ready,report.public_dict())
+        self.assertFalse(report.ready, "DB probes are not yet complete")
         self.assertEqual(provider.calls,[
             "https://id.example/.well-known/openid-configuration",
             "https://keys.example/jwks"])
         self.assertIn("provider.jwks",[c.name for c in report.checks])
+
+    def test_ready_requires_all_live_provider_and_role_gates(self):
+        # Exercise a synthetically successful read-only DB privilege probe,
+        # without a database connection, privileged identity or user secrets.
+        from contextlib import nullcontext
+        class Cursor:
+            def __init__(self,row):self.row=row
+            def fetchone(self):return self.row
+        class FakeDB:
+            def __init__(self,role):
+                self.role=role
+                self.closed=False
+            def __enter__(self):return self
+            def __exit__(self,*args):self.closed=True
+            def transaction(self):return nullcontext()
+            def execute(self,sql,params=None):
+                if sql=="SET TRANSACTION READ ONLY":return Cursor(None)
+                if sql.startswith("SELECT current_user, session_user"):
+                    return Cursor((self.role+"_login",self.role+"_login",
+                                   False,False,True,False))
+                if sql.startswith("SET LOCAL ROLE "):
+                    if sql!="SET LOCAL ROLE "+self.role:
+                        raise AssertionError("role escape")
+                    return Cursor(None)
+                if "has_function_privilege" in sql:
+                    if "sme.list_session_tenants" in sql:
+                        return Cursor((self.role=="sme_app",))
+                    if "sme.issue_oidc_session" in sql:
+                        return Cursor((self.role=="sme_auth",))
+                    if "sme.begin_oidc_login" in sql or "sme.consume_oidc_login" in sql:
+                        return Cursor((self.role=="sme_auth",))
+                if "has_table_privilege" in sql:
+                    return Cursor((False,))
+                raise AssertionError("unexpected SQL")
+        def connect(dsn):
+            return FakeDB("sme_app" if "app_role" in dsn else "sme_auth")
+        report=run_preflight(ready_env(),provider_http=HTTP(),db_connect=connect)
+        self.assertTrue(report.ready,report.public_dict())
+        self.assertEqual(len(report.checks),20)
+        self.assertTrue(all(c.passed for c in report.checks))
+
+    def test_unprivileged_read_only_preflight_cannot_be_skipped_to_ready(self):
+        report=run_preflight(ready_env(),provider_http=HTTP(),check_database=False)
+        self.assertFalse(report.ready)
+        report=run_preflight(ready_env(),check_network=False,
+                             db_connect=lambda _: (_ for _ in ()).throw(OSError("offline")))
+        self.assertFalse(report.ready)
 
     def test_mfa_and_callback_and_csrf_fail_independently(self):
         config=ready_env()
@@ -85,7 +132,7 @@ class PreflightTests(unittest.TestCase):
 
     def test_report_ready_requires_all_checks(self):
         self.assertFalse(Report(()).ready)
-        self.assertTrue(Report((Check("one",True,"ok"),)).ready)
+        self.assertFalse(Report((Check("one",True,"ok"),)).ready)
         self.assertFalse(Report((Check("one",True,"ok"),Check("two",False,"fail"))).ready)
 
 
