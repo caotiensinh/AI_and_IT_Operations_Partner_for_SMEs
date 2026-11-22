@@ -344,6 +344,37 @@ class OwnerApprovalTests(unittest.TestCase):
                           self.digest,self.tenant,"approve","email",
                           "tenant/alerts","tenant/secret","v"*64,"n"*43,role=role)
 
+    def test_postgres_stepup_store_uses_persisted_challenge_and_proof(self):
+        from sme_partner.asahi_stepup_oidc_flow import PostgresStepupStore, StepupAction
+        store=PostgresStepupStore(lambda: psycopg.connect(DSN))
+        action=StepupAction(self.tenant,"approve","email",
+                            "tenant/alerts","tenant/secret")
+        state=os.urandom(32)
+        browser=os.urandom(32)
+        self.assertTrue(store.begin(
+            state_digest=state,browser_digest=browser,session_digest=self.digest,
+            action=action,verifier="v"*64,nonce="n"*43
+        ))
+        self.assertEqual(store.identity(self.digest,self.tenant),("test",self.actor.hex))
+        self.assertIsNone(store.consume(
+            state_digest=state,browser_digest=os.urandom(32),
+            session_digest=self.digest,action=action
+        ))
+        self.assertEqual(store.consume(
+            state_digest=state,browser_digest=browser,
+            session_digest=self.digest,action=action
+        ),("v"*64,"n"*43))
+        self.assertIsNone(store.consume(
+            state_digest=state,browser_digest=browser,
+            session_digest=self.digest,action=action
+        ))
+        proof=store.issue(session_digest=self.digest,action=action,lifetime=60)
+        self.assertIsNotNone(proof)
+        self.assertTrue(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+
     def test_runtime_roles_no_direct_access(self):
         for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch"):
             with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
