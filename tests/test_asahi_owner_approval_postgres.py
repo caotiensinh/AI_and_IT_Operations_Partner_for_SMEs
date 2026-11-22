@@ -186,7 +186,7 @@ class OwnerApprovalTests(unittest.TestCase):
         self.assertIsNotNone(proof)
         self.assertFalse(self.call("approve_asahi_delivery_stepup",
             self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
-        self.db.execute("UPDATE sme.asahi_stepup_proofs SET expires_at=now()-interval '1 second' WHERE id=%s",
+        self.db.execute("UPDATE sme.asahi_stepup_proofs SET issued_at=now()-interval '120 seconds', expires_at=now()-interval '1 second' WHERE id=%s",
                         (proof,))
         self.assertFalse(self.call("revoke_asahi_delivery_stepup",
                                    self.digest,self.tenant,proof))
