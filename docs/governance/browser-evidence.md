@@ -17,3 +17,9 @@ The Live browser PostgreSQL E2E workflow runs **real Chromium → Vite → FastA
 - No user/operator sign-off, restart/recovery or production readiness.
 
 Therefore **all UI acceptance ledger records remain IN_PROGRESS/L1**. Existing Chromium CI evidence can support carefully scoped L2/L3 claims after independent verification, but cannot unilaterally upgrade them.
+
+## CI screenshot artifact quota failure
+
+If the browser assertions PASS but `actions/upload-artifact` reports **Artifact storage quota has been hit**, CI explicitly warns `EVIDENCE_ARCHIVE=FAILED` in the job summary. The Browser job may pass its code assertions; **the screenshot evidence gate remains FALSE**. Never record screenshots as verified or advance L4/L5 on that basis.
+
+The operator must reclaim or increase GitHub Actions artifact capacity through an authorized retention/deletion policy, rerun on the exact commit, inspect the resulting images and save required long-lived evidence in an approved store. Do not silently remove older audit evidence or invent download URLs. The negative-case and UI acceptance ledger stays `IN_PROGRESS` until actual artifacts are available and reviewed.
