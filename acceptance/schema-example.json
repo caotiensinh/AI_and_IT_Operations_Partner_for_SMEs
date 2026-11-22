@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "EXAMPLE-ONLY",
+  "title": "Template — replace with scoped task",
+  "status": "IN_PROGRESS",
+  "level": "L1",
+  "scope": "Single narrowly testable feature",
+  "environment": "staging",
+  "commit_sha": "",
+  "owner": "",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "Authorized operator",
+      "when": "Performs the task",
+      "then": "Expected persisted result",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "gates": {
+    "contract": true,
+    "persist": false,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "blockers": [
+    "Template only; do not count as a completed feature"
+  ]
+}
