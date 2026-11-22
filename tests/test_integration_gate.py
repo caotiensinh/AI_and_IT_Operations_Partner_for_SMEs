@@ -4,7 +4,8 @@ import json
 import unittest
 from pathlib import Path
 
-from sme_partner.integration_gate import GateError, evaluate, _safe_spec
+from sme_partner.integration_gate import GateError, evaluate, _safe_spec, GitHubReader
+from unittest.mock import patch
 
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -71,6 +72,19 @@ class IntegrationGateTests(unittest.TestCase):
         self.assertTrue(all(x["passed"] for x in report["checks"]))
         self.assertEqual(len(reader.calls),19)
         self.assertTrue(reader.calls[-1].endswith("head_sha="+MANIFEST["pull_requests"][-1]["head"]+"&per_page=100"))
+
+    def test_three_dot_compare_url_is_valid_but_traversal_is_rejected(self):
+        class FakeResponse:
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def read(self,_):return b'{"status":"ahead","behind_by":0}'
+        with patch("sme_partner.integration_gate.urlopen",return_value=FakeResponse()):
+            result=GitHubReader().get("/repos/owner/repo/compare/abc...main?per_page=1")
+            self.assertEqual(result["status"],"ahead")
+        for bad in ("/repos/owner/repo/../private",
+                    "/repos/owner/repo/%2e%2e/private"):
+            with self.subTest(path=bad),self.assertRaises(GateError):
+                GitHubReader().get(bad)
 
     def test_foundation_unmerged_or_not_in_main_blocks(self):
         foundation=MANIFEST["foundation"]
