@@ -104,6 +104,27 @@ class IntegrationGateTests(unittest.TestCase):
                 result=evaluate(MANIFEST,SyntheticReader(MANIFEST,runs=entries))
                 self.assertFalse(result["ready"])
 
+    def test_newer_failed_or_pending_run_cannot_be_masked_by_old_success(self):
+        sha=MANIFEST["pull_requests"][-1]["head"]
+        name=MANIFEST["terminal_ci"]["workflows"][0]
+        old_green=[{"name":x,"head_sha":sha,"status":"completed","conclusion":"success"}
+                   for x in MANIFEST["terminal_ci"]["workflows"]]
+        for result,status in (("failure","completed"),(None,"in_progress")):
+            newest={"name":name,"head_sha":sha,"status":status,"conclusion":result}
+            evaluated=evaluate(MANIFEST,SyntheticReader(MANIFEST,runs=[newest]+old_green))
+            self.assertFalse(evaluated["ready"])
+            self.assertIn("ci."+name,[x["check"] for x in evaluated["checks"] if not x["passed"]])
+
+    def test_truncated_github_workflow_response_is_not_ready(self):
+        class TruncatedReader(SyntheticReader):
+            def get(self,path):
+                obj=super().get(path)
+                if "/actions/runs" in path:
+                    obj["total_count"]=len(obj["workflow_runs"])+1
+                return obj
+        result=evaluate(MANIFEST,TruncatedReader(MANIFEST))
+        self.assertFalse(result["ready"])
+
     def test_manifest_rejects_duplicates_bad_sha_and_missing_ci(self):
         for mutation in (
             lambda m:m["pull_requests"].append(copy.deepcopy(m["pull_requests"][-1])),
