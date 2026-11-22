@@ -3,6 +3,7 @@
 import { chromium } from 'playwright';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 
 const fixture=JSON.parse(readFileSync(process.env.SME_E2E_FIXTURE_PATH,'utf8'));
@@ -13,8 +14,18 @@ const captures=[];
 if(evidenceDir) mkdirSync(evidenceDir,{recursive:true});
 async function capture(page,name,width,height) {
   if(!evidenceDir) return;
-  await page.screenshot({path:join(evidenceDir,name+'.png'),fullPage:true,animations:'disabled'});
-  captures.push({name,viewport:{width,height},source:'live Chromium/Vite/FastAPI/PostgreSQL with disposable synthetic CI fixture'});
+  const bytes=await page.screenshot({path:join(evidenceDir,name+'.png'),fullPage:false,animations:'disabled'});
+  assert.equal(bytes.subarray(1,4).toString('ascii'),'PNG','PNG signature missing');
+  const actualWidth=bytes.readUInt32BE(16), actualHeight=bytes.readUInt32BE(20);
+  assert.equal(actualWidth,width,'screenshot width mismatch');
+  assert.equal(actualHeight,height,'screenshot height mismatch');
+  assert.ok(bytes.length>=5000,'screenshot unexpectedly small or blank');
+  captures.push({
+    name,file:name+'.png',viewport:{width,height},
+    actual_png:{width:actualWidth,height:actualHeight,bytes:bytes.length,
+      sha256:createHash('sha256').update(bytes).digest('hex')},
+    source:'live Chromium/Vite/FastAPI/PostgreSQL with disposable synthetic CI fixture'
+  });
 }
 
 async function openWithToken(width,height,token) {
@@ -81,6 +92,11 @@ try {
       idp:'CI header-token bypass; not real OIDC browser login',
       production_ready:false,
       source_sha:process.env.CI_SOURCE_SHA||'not-set',
+      acceptance_status:'UNREVIEWED',
+      archival_status:'NOT_VERIFIED',
+      capture_integrity_verified:true,
+      expected_screen_count:13,
+      actual_screen_count:captures.length,
       screens:captures
     },null,2));
     assert.equal(captures.length,13,'expected 12 screen/viewport captures plus unauthorized state');
