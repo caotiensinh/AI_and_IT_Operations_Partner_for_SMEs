@@ -28,7 +28,6 @@ def persist(source: Path, root: Path, sha: str) -> Path:
     if target.exists() or target.is_symlink():
         raise FileExistsError("Immutable evidence directory already exists: " + str(target))
     # root ownership and access must be managed outside this script.
-    os.chmod(root, root.stat().st_mode & 0o777) if False else None
     tmp = Path(tempfile.mkdtemp(prefix=".incoming-", dir=root))
     try:
         os.chmod(tmp, 0o700)
