@@ -40,7 +40,7 @@ jobs:
           p=json.load(open('/tmp/discovery-integration-readiness.json'))
           print(json.dumps({'ready':p['ready'],'checks':len(p['checks']),
                             'passed':sum(x['passed'] for x in p['checks']),
-                            'blocked':[x['check'] for x in p['checks'] if not x['passed']]},
+                            'blocked':[{'check':x['check'],'detail':x['detail']} for x in p['checks'] if not x['passed']]},
                            sort_keys=True))
           assert p['ready']
           PY
