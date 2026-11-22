@@ -1,0 +1,46 @@
+name: Discovery integration readiness gate
+on:
+  push:
+    paths:
+      - 'src/sme_partner/integration_gate.py'
+      - 'tests/test_integration_gate.py'
+      - 'specs/003-sme-business-needs/integration-chain.json'
+      - '.github/workflows/discovery-integration-gate.yml'
+  pull_request:
+    paths:
+      - 'src/sme_partner/integration_gate.py'
+      - 'tests/test_integration_gate.py'
+      - 'specs/003-sme-business-needs/integration-chain.json'
+      - '.github/workflows/discovery-integration-gate.yml'
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+jobs:
+  stacked-pr-readiness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: src
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Contract and failure-path tests
+        run: python -m unittest discover -s tests -p 'test_integration_gate.py' -v
+      - name: Read-only live PR and exact-SHA CI verification
+        run: |
+          python -m sme_partner.integration_gate \
+            --manifest specs/003-sme-business-needs/integration-chain.json \
+            > /tmp/discovery-integration-readiness.json
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/discovery-integration-readiness.json'))
+          print(json.dumps({'ready':p['ready'],'checks':len(p['checks']),
+                            'passed':sum(x['passed'] for x in p['checks']),
+                            'blocked':[x['check'] for x in p['checks'] if not x['passed']]},
+                           sort_keys=True))
+          assert p['ready']
+          PY
