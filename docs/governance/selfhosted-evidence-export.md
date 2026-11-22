@@ -22,6 +22,11 @@ python scripts/persist_browser_evidence.py \
   --source "$SME_E2E_SCREENSHOT_DIR" \
   --root /srv/sme-evidence \
   --source-sha "$COMMIT_SHA"
+
+# Independent, read-only verification of the stored copy:
+python scripts/verify_stored_browser_evidence.py \
+  --root /srv/sme-evidence \
+  --source-sha "$COMMIT_SHA"
 ```
 The storage script rejects missing roots, invalid PNG/manifest/SHA, collisions, and mismatched copy hashes. Output is `/srv/sme-evidence/<sha>/` with 13 PNGs, manifest and SHA256SUMS. Treat any failure as evidence BLOCKED.
 
