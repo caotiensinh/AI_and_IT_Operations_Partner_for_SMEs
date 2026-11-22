@@ -39,13 +39,13 @@ class DispatchQueueTests(unittest.TestCase):
             (self.tenant,self.site,self.device,datetime.now(timezone.utc))
         ).fetchone()[0]
 
-    def claim(self,owner=None,lease=30,role="sme_dispatch"):
+    def claim(self,owner=None,lease=30,role="sme_dispatch",tenant=None):
         with psycopg.connect(DSN) as conn:
             with conn.transaction():
                 conn.execute("SET LOCAL ROLE "+role)
                 return conn.execute(
-                    "SELECT * FROM sme.claim_asahi_alert(%s,%s)",
-                    (owner or self.worker,lease)
+                    "SELECT * FROM sme.claim_asahi_alert(%s,%s,%s)",
+                    (tenant or self.tenant,owner or self.worker,lease)
                 ).fetchall()
 
     def finish(self,owner=None,success=True,retry=10,role="sme_dispatch"):
@@ -147,6 +147,11 @@ class DispatchQueueTests(unittest.TestCase):
                 with self.db.transaction():
                     self.db.execute("SET LOCAL ROLE sme_dispatch")
                     self.db.execute(sql)
+
+    def test_claim_scoped_to_explicit_tenant(self):
+        stranger=uuid4()
+        self.assertEqual(self.claim(tenant=stranger),[])
+        self.assertEqual(len(self.claim(tenant=self.tenant)),1)
 
     def test_cannot_ack_twice(self):
         self.claim()

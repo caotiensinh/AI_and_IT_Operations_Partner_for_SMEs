@@ -26,7 +26,7 @@ REVOKE ALL ON sme.asahi_alert_outbox FROM PUBLIC,sme_dispatch,sme_app,sme_ingest
 -- Separate dispatcher service role may only claim one message at a time.
 -- There are no delivery URLs, external credentials or provider calls in SQL.
 CREATE OR REPLACE FUNCTION sme.claim_asahi_alert(
- p_owner uuid, p_lease_seconds integer
+ p_tenant uuid, p_owner uuid, p_lease_seconds integer
 ) RETURNS TABLE(
  event_id bigint,tenant_id uuid,site_id uuid,device_id uuid,
  metric text,transition text,metric_value numeric,sampled_at timestamptz
@@ -34,14 +34,14 @@ CREATE OR REPLACE FUNCTION sme.claim_asahi_alert(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,sme AS $$
 BEGIN
- IF p_owner IS NULL OR p_owner='00000000-0000-0000-0000-000000000000'::uuid
+ IF p_tenant IS NULL OR p_owner IS NULL OR p_owner='00000000-0000-0000-0000-000000000000'::uuid
    OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 5 AND 300
  THEN RETURN; END IF;
  RETURN QUERY
  WITH candidate AS (
    SELECT o.id FROM sme.asahi_alert_outbox o
    JOIN sme.tenants t ON t.id=o.tenant_id AND t.status='active'
-   WHERE o.delivered_at IS NULL AND o.dead_lettered_at IS NULL
+   WHERE o.tenant_id=p_tenant AND o.delivered_at IS NULL AND o.dead_lettered_at IS NULL
      AND o.next_attempt_at<=now() AND o.delivery_attempts<5
      AND (o.delivery_lease_until IS NULL OR o.delivery_lease_until<=now())
    ORDER BY o.next_attempt_at,o.id
@@ -87,7 +87,7 @@ BEGIN
  RETURN changed IS NOT NULL;
 END $$;
 
-REVOKE ALL ON FUNCTION sme.claim_asahi_alert(uuid,integer) FROM PUBLIC,sme_app,sme_auth,sme_ingest;
+REVOKE ALL ON FUNCTION sme.claim_asahi_alert(uuid,uuid,integer) FROM PUBLIC,sme_app,sme_auth,sme_ingest;
 REVOKE ALL ON FUNCTION sme.finish_asahi_alert(bigint,uuid,boolean,integer) FROM PUBLIC,sme_app,sme_auth,sme_ingest;
 GRANT EXECUTE ON FUNCTION sme.claim_asahi_alert(uuid,integer) TO sme_dispatch;
 GRANT EXECUTE ON FUNCTION sme.finish_asahi_alert(bigint,uuid,boolean,integer) TO sme_dispatch;
