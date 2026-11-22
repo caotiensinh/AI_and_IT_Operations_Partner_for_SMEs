@@ -35,9 +35,8 @@ class PreflightDatabaseTests(unittest.TestCase):
             (cls.auth_name,cls.auth_password,"sme_auth"),
         ):
             cls.owner.execute(
-                sql.SQL("CREATE ROLE {} LOGIN NOINHERIT PASSWORD %s").format(
-                    sql.Identifier(role)),
-                (password,))
+                sql.SQL("CREATE ROLE {} LOGIN NOINHERIT PASSWORD {}").format(
+                    sql.Identifier(role),sql.Literal(password)))
             cls.owner.execute(
                 sql.SQL("GRANT {} TO {}").format(
                     sql.Identifier(member),sql.Identifier(role)))
