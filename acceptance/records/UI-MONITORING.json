@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "status": "IN_PROGRESS",
+  "level": "L1",
+  "environment": "staging",
+  "commit_sha": "b5b0ec8970f71d727f3244a2a4ca2ff848725cc5",
+  "owner": "implementation-team",
+  "gates": {
+    "contract": true,
+    "persist": true,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "id": "UI-MONITORING",
+  "title": "Asahi latest device monitoring",
+  "scope": "Monitoring screen shows latest authorized Asahi telemetry with truthful missing/stale states",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "A permitted device emits a real telemetry sample",
+      "when": "User opens Monitoring",
+      "then": "CPU, memory, hostname and UTC sample time equal persisted backend values",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-02",
+      "given": "Telemetry fields are absent or unavailable",
+      "when": "Device row renders",
+      "then": "Unavailable readings display N/A and are not silently treated as zero",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-03",
+      "given": "A tenant attempts access to another tenant telemetry",
+      "when": "User sends an unauthorized request",
+      "then": "Backend denies access; UI shows no foreign sample",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-04",
+      "given": "Collector is stopped and restarted in staging",
+      "when": "User refreshes Monitoring",
+      "then": "Failures are visible, latest known sample is distinguishable from fresh data, recovery is evidenced",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-05",
+      "given": "Browser is mobile 390px and desktop 1440px",
+      "when": "User views monitoring",
+      "then": "Table remains navigable with no inaccessible essential actions",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "blockers": [
+    "No real Asahi device/agent telemetry E2E captured for this screen",
+    "No failure/recovery and stale-data validation",
+    "No desktop/mobile real-browser screenshots or operator acceptance"
+  ]
+}
