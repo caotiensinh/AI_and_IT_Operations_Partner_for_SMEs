@@ -34,7 +34,7 @@ jobs:
           from pathlib import Path
           import secrets
           p=Path('.env.staging')
-          p.write_text('SME_DB_ADMIN_PASSWORD='+secrets.token_hex(32)+'\nSME_RUNTIME_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_INGEST_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_DISPATCH_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_HTTP_PORT=18080\n')
+          p.write_text('SME_DB_ADMIN_PASSWORD='+secrets.token_hex(32)+'\nSME_RUNTIME_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_INGEST_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_DISPATCH_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_STEPUP_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_APPROVAL_DB_PASSWORD='+secrets.token_hex(32)+'\nSME_HTTP_PORT=18080\n')
           p.chmod(0o600)
           PY
       - name: Validate Compose definition
@@ -80,6 +80,11 @@ jobs:
           docker compose --env-file .env.staging -f compose.staging.yml \
             run --rm --no-deps --entrypoint /bin/sh migrate \
             /deploy/check_dispatch_login.sh
+      - name: Verify real isolated step-up issuer and approver password logins
+        run: |
+          docker compose --env-file .env.staging -f compose.staging.yml \
+            run --rm --no-deps --entrypoint /bin/sh migrate \
+            /deploy/check_stepup_logins.sh
       - name: PostgreSQL backup and restore drill
         env:
           SME_E2E_FIXTURE_MODE: disposable_ci_only
