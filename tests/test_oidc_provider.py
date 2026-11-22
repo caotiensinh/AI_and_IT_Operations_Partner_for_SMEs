@@ -4,6 +4,7 @@ No actual user identity, client secret, internet provider or tenant is contacted
 """
 import json
 import unittest
+import base64
 from datetime import datetime,timezone,timedelta
 import jwt
 from urllib.parse import urlsplit
@@ -143,6 +144,15 @@ class ProviderAdapterTests(unittest.TestCase):
             with self.assertRaises(ProviderUnavailable):
                 client.exchange_code("c"*32,"v"*48,redirect,clientid)
         self.assertEqual(len(http.calls),1)
+
+    def test_basic_client_credentials_encode_reserved_secret_characters(self):
+        cfg=settings(client_secret="synthetic+secret/with space:and=sign")
+        http=FakeHTTP({cfg.token_endpoint:{"id_token":"z"*100}})
+        VerifiedProviderClient(cfg,http).exchange_code(
+            "c"*32,"v"*48,cfg.redirect_uri,cfg.client_id)
+        _,_,headers,_=http.calls[0]
+        decoded=base64.b64decode(headers["Authorization"].split(" ",1)[1]).decode("ascii")
+        self.assertEqual(decoded,"test-client:synthetic%2Bsecret%2Fwith+space%3Aand%3Dsign")
 
     def test_http_transport_rejects_redirect_and_large_or_invalid_json(self):
         class Response:
