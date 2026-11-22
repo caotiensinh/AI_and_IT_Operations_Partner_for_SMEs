@@ -35,6 +35,7 @@ jobs:
     env:
       SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@127.0.0.1:5432/sme_test
       SME_E2E_ONLY: '1'
+      SME_E2E_COOKIE_MODE: '1'
       SME_E2E_FIXTURE_PATH: /tmp/sme-discovery-cookie-e2e.json
       DISCOVERY_API_ORIGIN: http://127.0.0.1:8001
       DISCOVERY_TLS_CERT: /tmp/sme-cookie-e2e.pem
