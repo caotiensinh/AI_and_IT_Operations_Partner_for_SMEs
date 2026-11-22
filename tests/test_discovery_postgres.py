@@ -179,3 +179,107 @@ class DiscoveryPostgresTests(unittest.TestCase):
                             "(tenant_id,id,identity_id,role,scope_type) "
                             "VALUES (%s,%s,%s,'viewer','tenant')",
                             (self.a,uuid4(),self.ia))
+
+    def test_cases_keyset_pagination(self):
+        extra = uuid4()
+        self.db.execute(
+            "INSERT INTO sme.discovery_cases(tenant_id,id,site_id,label,company_code) "
+            "VALUES (%s,%s,%s,'Second case','OTHER')",(self.a,extra,self.sa))
+        try:
+            first = self.client.get(
+                f"/v1/tenants/{self.a}/research-cases?limit=1",
+                headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(first.status_code,200,first.text)
+            self.assertEqual(len(first.json()["cases"]),1)
+            self.assertIsNotNone(first.json()["next_cursor"])
+            second = self.client.get(
+                f"/v1/tenants/{self.a}/research-cases",
+                params={"limit":1,"after":first.json()["next_cursor"]},
+                headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(second.status_code,200,second.text)
+            self.assertEqual(len(second.json()["cases"]),1)
+            self.assertIsNone(second.json()["next_cursor"])
+            self.assertEqual({first.json()["cases"][0]["id"],second.json()["cases"][0]["id"]},
+                             {str(self.ca),str(extra)})
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id=%s",
+                            (self.a,extra))
+
+    def test_site_scope_filters_before_pagination(self):
+        second_site,hidden_case,visible_case=uuid4(),uuid4(),uuid4()
+        self.db.execute("INSERT INTO sme.sites(tenant_id,id,label) VALUES (%s,%s,'Second')",
+                        (self.a,second_site))
+        self.db.execute("INSERT INTO sme.discovery_cases "
+                        "(tenant_id,id,site_id,label,company_code) VALUES "
+                        "(%s,%s,%s,'Hidden','OTHER'),(%s,%s,%s,'Visible','OTHER')",
+                        (self.a,hidden_case,second_site,self.a,visible_case,self.sa))
+        self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                        (self.a,self.ia))
+        self.db.execute("INSERT INTO sme.role_assignments "
+                        "(tenant_id,id,identity_id,role,scope_type,site_id) "
+                        "VALUES (%s,%s,%s,'viewer','site',%s)",
+                        (self.a,uuid4(),self.ia,self.sa))
+        try:
+            ids=[]
+            after=None
+            for _ in range(4):
+                params={"limit":1}
+                if after: params["after"]=after
+                res=self.client.get(
+                    f"/v1/tenants/{self.a}/research-cases",
+                    params=params,headers={"Authorization":f"Bearer {self.token}"})
+                self.assertEqual(res.status_code,200,res.text)
+                ids.extend(x["id"] for x in res.json()["cases"])
+                after=res.json()["next_cursor"]
+                if after is None: break
+            self.assertEqual(set(ids),{str(self.ca),str(visible_case)})
+            self.assertNotIn(str(hidden_case),ids)
+            denied=self.client.get(
+                f"/v1/tenants/{self.a}/research-cases/{hidden_case}/requirements",
+                headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(denied.status_code,404,denied.text)
+        finally:
+            self.db.execute("DELETE FROM sme.role_assignments WHERE tenant_id=%s AND identity_id=%s",
+                            (self.a,self.ia))
+            self.db.execute("INSERT INTO sme.role_assignments "
+                            "(tenant_id,id,identity_id,role,scope_type) "
+                            "VALUES (%s,%s,%s,'viewer','tenant')",
+                            (self.a,uuid4(),self.ia))
+            self.db.execute("DELETE FROM sme.discovery_cases WHERE tenant_id=%s AND id IN (%s,%s)",
+                            (self.a,hidden_case,visible_case))
+            self.db.execute("DELETE FROM sme.sites WHERE tenant_id=%s AND id=%s",
+                            (self.a,second_site))
+
+    def test_requirement_pagination_and_traceability(self):
+        extra=uuid4()
+        self.db.execute("INSERT INTO sme.discovery_requirements "
+                        "(tenant_id,id,case_id,statement,classification) "
+                        "VALUES (%s,%s,%s,'Unconfirmed hypothesis','inferred')",
+                        (self.a,extra,self.ca))
+        try:
+            endpoint=f"/v1/tenants/{self.a}/research-cases/{self.ca}/requirements"
+            first=self.client.get(endpoint,params={"limit":1},
+                                  headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(first.status_code,200,first.text)
+            self.assertEqual(len(first.json()["requirements"]),1)
+            self.assertIsNotNone(first.json()["next_cursor"])
+            second=self.client.get(endpoint,params={"limit":1,"after":first.json()["next_cursor"]},
+                                   headers={"Authorization":f"Bearer {self.token}"})
+            self.assertEqual(second.status_code,200,second.text)
+            self.assertEqual(len(second.json()["requirements"]),1)
+            self.assertIsNone(second.json()["next_cursor"])
+            both=first.json()["requirements"]+second.json()["requirements"]
+            self.assertEqual({r["classification"] for r in both},{"explicit","inferred"})
+            inferred=next(r for r in both if r["classification"]=="inferred")
+            self.assertIsNone(inferred["source"])
+        finally:
+            self.db.execute("DELETE FROM sme.discovery_requirements WHERE tenant_id=%s AND id=%s",
+                            (self.a,extra))
+
+    def test_invalid_limit_and_cursor_rejected(self):
+        endpoint=f"/v1/tenants/{self.a}/research-cases"
+        for params in ({"limit":0},{"limit":101},{"limit":1,"after":"not-a-uuid"}):
+            with self.subTest(params=params):
+                r=self.client.get(endpoint,params=params,
+                                  headers={"Authorization":f"Bearer {self.token}"})
+                self.assertEqual(r.status_code,422,r.text)
