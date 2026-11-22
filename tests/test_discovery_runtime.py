@@ -89,7 +89,7 @@ class ConfiguredRuntimeTests(unittest.TestCase):
         with patch("sme_partner.discovery_runtime.psycopg.connect",side_effect=AssertionError(
             "No DB connection should open until auth request")):
             app=create_configured_discovery_app(env(),provider_http=http)
-        self.assertEqual(app.title,"FastAPI")
+        self.assertEqual(app.title,"SME Research Discovery Read API")
         self.assertEqual(http.calls,[
             "https://id.example/.well-known/openid-configuration",
             "https://keys.example/jwks",
