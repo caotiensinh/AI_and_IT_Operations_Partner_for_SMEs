@@ -35,7 +35,10 @@ class PersistEvidenceTests(unittest.TestCase):
     def test_persist_and_verify(self):
         dest=archive.persist(self.source,self.root,SHA)
         self.assertEqual(len(list(dest.iterdir())),15)
-        self.assertEqual(pack.inspect(dest,SHA),pack.inspect(self.source,SHA) if False else {k:v for k,v in pack.inspect(self.source,SHA).items()})
+        import hashlib
+        for name, digest in pack.inspect(self.source,SHA).items():
+            self.assertEqual(hashlib.sha256((dest/name).read_bytes()).hexdigest(),digest)
+        self.assertIn('manifest.json', (dest/'SHA256SUMS').read_text())
     def test_existing_archive_never_overwritten(self):
         archive.persist(self.source,self.root,SHA)
         with self.assertRaises(FileExistsError):
