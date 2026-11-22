@@ -33,7 +33,7 @@ def main():
     token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
     with psycopg.connect(DSN) as conn:
         # Migrations run with the migration/provisioning owner, never runtime app.
-        for number in (1,2,3,5,6,7,8,9,10,11):
+        for number in (1,2,3,5,6,7,8,9,10,11,12) if os.getenv("SME_E2E_COOKIE_MODE")=="1" else (1,2,3,5,6,7,8,9,10,11):
             matches = list((ROOT / "migrations").glob(f"{number:04d}_*.sql"))
             if len(matches) != 1:
                 raise RuntimeError(f"Expected exactly one migration {number:04d}")
