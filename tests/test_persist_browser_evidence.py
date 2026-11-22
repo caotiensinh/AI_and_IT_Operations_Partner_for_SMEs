@@ -1,6 +1,7 @@
 """Positive and negative archive storage contract regressions."""
 import importlib.util
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
