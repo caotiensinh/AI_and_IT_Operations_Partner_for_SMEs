@@ -74,7 +74,7 @@ def inspect_payload(archive: Path, sha: str) -> dict[str, str]:
         if path.is_symlink() or not path.is_file():
             raise ValueError("Invalid screenshot file")
         data = path.read_bytes()
-        if len(data) < 5000 or len(data) > 12*1024*1024 or data[:8] != b"\\x89PNG\\r\\n\\x1a\\n" or data[12:16] != b"IHDR":
+        if len(data) < 5000 or len(data) > 12*1024*1024 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
             raise ValueError("Invalid PNG content")
         real_width,real_height=struct.unpack(">II",data[16:24])
         checksum=hashlib.sha256(data).hexdigest()
