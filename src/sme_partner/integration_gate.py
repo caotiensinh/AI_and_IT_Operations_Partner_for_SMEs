@@ -54,8 +54,13 @@ class GitHubReader:
                 if not isinstance(data, dict):
                     raise GateError("GitHub API response not an object")
                 return data
-        except (HTTPError, URLError, TimeoutError, ValueError, OSError):
-            raise GateError("GitHub API unavailable; verification incomplete") from None
+        except HTTPError as exc:
+            # HTTP status only, never include response body or token-bearing URL.
+            raise GateError("GitHub API HTTP " + str(exc.code)) from None
+        except (URLError, TimeoutError, OSError):
+            raise GateError("GitHub API network unavailable") from None
+        except ValueError:
+            raise GateError("GitHub API returned invalid JSON") from None
 
 
 def _safe_spec(data: dict) -> tuple[str, list[dict], dict]:
@@ -125,8 +130,10 @@ def evaluate(manifest: dict, reader: GitHubReader) -> dict:
         emit("foundation.main_ancestor",ancestor,
              "Pinned foundation merge commit is an ancestor of current main"
              if ancestor else "Foundation merge commit not verified in current main")
-    except (GateError,KeyError,TypeError,ValueError):
-        emit("foundation.main_ancestor",False,"Main ancestry evidence unavailable")
+    except GateError as exc:
+        emit("foundation.main_ancestor",False,"Main ancestry evidence unavailable: "+str(exc))
+    except (KeyError,TypeError,ValueError):
+        emit("foundation.main_ancestor",False,"Main ancestry response invalid")
     prior = None
     for node in nodes:
         n = node["number"]
