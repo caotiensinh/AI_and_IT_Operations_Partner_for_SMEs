@@ -65,17 +65,29 @@ class OwnerApprovalTests(unittest.TestCase):
                     "SELECT sme." + fn + "(" + placeholders + ")",args
                 ).fetchone()[0]
 
+    def issue(self, action, digest, tenant, channel=None, destination=None, secret=None, lifetime=60):
+        return self.call("issue_asahi_stepup", digest, tenant, action,
+                         channel, destination, secret, lifetime, role="sme_stepup")
+
     def approve(self, digest=None, tenant=None, channel="email",
                 destination="tenant/alerts", secret="tenant/secret", role="sme_approval"):
-        return self.call("approve_asahi_delivery",
-                         self.digest if digest is None else digest,
-                         self.tenant if tenant is None else tenant,
-                         channel,destination,secret,role=role)
+        digest = self.digest if digest is None else digest
+        tenant = self.tenant if tenant is None else tenant
+        if role != "sme_approval":
+            return self.call("approve_asahi_delivery_stepup", digest, tenant, uuid4(),
+                             channel, destination, secret, role=role)
+        proof = self.issue("approve", digest, tenant, channel, destination, secret)
+        return bool(proof) and self.call("approve_asahi_delivery_stepup", digest,
+                                         tenant, proof, channel, destination, secret, role=role)
 
     def revoke(self, digest=None, tenant=None, role="sme_approval"):
-        return self.call("revoke_asahi_delivery",
-                         self.digest if digest is None else digest,
-                         self.tenant if tenant is None else tenant,role=role)
+        digest = self.digest if digest is None else digest
+        tenant = self.tenant if tenant is None else tenant
+        if role != "sme_approval":
+            return self.call("revoke_asahi_delivery_stepup", digest, tenant, uuid4(), role=role)
+        proof = self.issue("revoke", digest, tenant)
+        return bool(proof) and self.call("revoke_asahi_delivery_stepup", digest,
+                                         tenant, proof, role=role)
 
     def test_owner_approves_and_revokes_with_audit(self):
         self.assertTrue(self.approve())
