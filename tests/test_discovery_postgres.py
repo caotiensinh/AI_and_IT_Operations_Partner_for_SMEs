@@ -944,43 +944,52 @@ class DiscoveryPostgresTests(unittest.TestCase):
             csrf_secret=b"synthetic-ci-only-csrf-secret-not-for-customer!",
             trusted_origin="https://pilot.test"
         )
-        with TestClient(app,base_url="https://pilot.test",follow_redirects=False) as browser:
-            self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
-            # An untrusted Authorization header never substitutes for session cookies.
-            self.assertEqual(browser.get("/v1/tenants/%s/research-cases" % self.a,
-                headers={"Authorization":f"Bearer {self.token}"}).status_code,401)
-            browser.cookies.set("__Host-sme_session",self.token,domain="pilot.test",path="/")
-            t=browser.get("/auth/session/tenants")
-            self.assertEqual(t.status_code,200,t.text)
-            self.assertEqual(t.json()["tenants"],[{"id":str(self.a),"label":"Research A"}])
-            self.assertNotIn(self.token,t.text)
-            csrf=t.json()["csrf_token"]
-            self.assertEqual(len(csrf),64)
-            cases=browser.get(f"/v1/tenants/{self.a}/research-cases")
-            self.assertEqual(cases.status_code,200,cases.text)
-            self.assertEqual(len(cases.json()["cases"]),1)
-            self.assertEqual(browser.get(
-                f"/v1/tenants/{self.b}/research-cases").status_code,403)
-            self.assertEqual(browser.get("/v1/session/logout").status_code,404)
-            self.assertEqual(browser.post("/auth/session/logout").status_code,403)
-            self.assertEqual(browser.post("/auth/session/logout",headers={
-                "Origin":"https://attacker.example","X-CSRF-Token":csrf
-            }).status_code,403)
-            self.assertEqual(browser.post("/auth/session/logout",headers={
-                "Origin":"https://pilot.test","X-CSRF-Token":"0"*64
-            }).status_code,403)
-            self.assertEqual(browser.post("/auth/session/logout",headers={
-                "Origin":"https://pilot.test","X-CSRF-Token":csrf,
-                "Authorization":f"Bearer {self.token}"
-            }).status_code,400)
-            # State remains active after all failed attempts; logout requires both signals.
-            self.assertEqual(browser.get("/auth/session/tenants").status_code,200)
-            result=browser.post("/auth/session/logout",headers={
-                "Origin":"https://pilot.test","X-CSRF-Token":csrf
-            })
-            self.assertEqual(result.status_code,204,result.text)
-            self.assertIn("Max-Age=0",result.headers.get("set-cookie",""))
-            self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+        token=base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        sid=uuid4()
+        self.db.execute("INSERT INTO sme.sessions(id,identity_id,token_digest,expires_at) "
+                        "VALUES (%s,%s,%s,%s)",(sid,self.ia,hashlib.sha256(token.encode()).digest(),
+                        datetime.now(timezone.utc)+timedelta(hours=1)))
+        try:
+            with TestClient(app,base_url="https://pilot.test",follow_redirects=False) as browser:
+                self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+                # An untrusted Authorization header never substitutes for session cookies.
+                self.assertEqual(browser.get("/v1/tenants/%s/research-cases" % self.a,
+                    headers={"Authorization":f"Bearer {token}"}).status_code,401)
+                browser.cookies.set("__Host-sme_session",token,domain="pilot.test",path="/")
+                t=browser.get("/auth/session/tenants")
+                self.assertEqual(t.status_code,200,t.text)
+                self.assertEqual(t.json()["tenants"],[{"id":str(self.a),"label":"Research A"}])
+                self.assertNotIn(token,t.text)
+                csrf=t.json()["csrf_token"]
+                self.assertEqual(len(csrf),64)
+                cases=browser.get(f"/v1/tenants/{self.a}/research-cases")
+                self.assertEqual(cases.status_code,200,cases.text)
+                self.assertEqual(len(cases.json()["cases"]),1)
+                self.assertEqual(browser.get(
+                    f"/v1/tenants/{self.b}/research-cases").status_code,403)
+                self.assertEqual(browser.get("/v1/session/logout").status_code,404)
+                self.assertEqual(browser.post("/auth/session/logout").status_code,403)
+                self.assertEqual(browser.post("/auth/session/logout",headers={
+                    "Origin":"https://attacker.example","X-CSRF-Token":csrf
+                }).status_code,403)
+                self.assertEqual(browser.post("/auth/session/logout",headers={
+                    "Origin":"https://pilot.test","X-CSRF-Token":"0"*64
+                }).status_code,403)
+                self.assertEqual(browser.post("/auth/session/logout",headers={
+                    "Origin":"https://pilot.test","X-CSRF-Token":csrf,
+                    "Authorization":f"Bearer {token}"
+                }).status_code,400)
+                # State remains active after all failed attempts; logout requires both signals.
+                self.assertEqual(browser.get("/auth/session/tenants").status_code,200)
+                result=browser.post("/auth/session/logout",headers={
+                    "Origin":"https://pilot.test","X-CSRF-Token":csrf
+                })
+                self.assertEqual(result.status_code,204,result.text)
+                self.assertIn("Max-Age=0",result.headers.get("set-cookie",""))
+                self.assertEqual(browser.get("/auth/session/tenants").status_code,401)
+
+        finally:
+            self.db.execute("DELETE FROM sme.sessions WHERE id=%s",(sid,))
 
     def test_cookie_bff_scope_revocation_and_no_forged_tenant(self):
         from sme_partner.discovery_bff import create_cookie_discovery_app
