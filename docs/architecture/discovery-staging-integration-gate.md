@@ -25,7 +25,7 @@ The command fetches **read-only GitHub API** data. For a private repository, sup
 3. The last PR's configured required workflows have completed with **success on its exact SHA**, never a previous source commit. Pending, failed, absent or inaccessible evidence blocks approval.
 4. JSON has `ready`, `terminal_sha`, stable check names, pass/fail values and non-sensitive messages. The terminal exit code is 0 only when the whole gate succeeds.
 
-The checked PR list currently starts at #19 and runs through #55. **Prerequisites before #19 are not within this manifest and must be separately audited**. This gate also does not test the `main` merge result or account for branches updated after the check; rerun after any change, and independently run integration checks on a merged staging candidate before release.
+The checked open PR list now starts at #15, includes #17 and #18, and runs through #55. The gate additionally verifies that **merged foundation PR #13** is pinned by its original head and merge commit and that this merge commit is an ancestor of the current `main` history. Merged PRs #1–#12 and #14 are not individually re-audited by this gate; their integration into `main` remains part of the separately verified repository baseline. This gate also does not test the `main` merge result or account for branches updated after the check; rerun after any change, and independently run integration checks on a merged staging candidate before release.
 
 ### Snapshot and freshness
 The manifest pins an evidence snapshot. It deliberately goes stale if any listed source branch changes or if any PR is merged/closed. Update it only after inspecting the changed branch, reproducing required tests and reviewing the delta. Never automatically rewrite the manifest with whatever GitHub currently returns; that would defeat the pinning.
@@ -33,7 +33,7 @@ The manifest pins an evidence snapshot. It deliberately goes stale if any listed
 GitHub Actions: `Discovery integration readiness gate` uses the same read-only API, with a restricted `GITHUB_TOKEN`; network failures are FAIL/UNKNOWN, not PASS. No token or private URLs appear in the result summary.
 
 ## Staging procedure (operator approval required)
-1. Verify which open PRs are required, their logical order and their dependency state. Include unlisted earlier PRs, which are **outside** the current gate.
+1. Verify which open PRs are required and their logical order. The gate covers #15, #17, #18 and #19–#55, plus the merged PR #13 ancestry check. Review baseline migrations and previously merged PRs separately before release.
 2. Review authentication, RLS, DB migrations and role grants with an independent reviewer. Review idempotency, sensitive logging and tenant isolation regressions.
 3. Re-run the integration gate at the exact candidate SHA. Inspect all relevant workflow runs and compile a deployment evidence record including hashes, reviewer, risk assessment and rollback plan.
 4. Prepare staging-only TLS domain and trusted certificate, network egress policies, secrets manager, separated PostgreSQL service roles and an **empty/disposable** staging database. Never use production customer data.
@@ -47,10 +47,16 @@ GitHub Actions: `Discovery integration readiness gate` uses the same read-only A
 GitHub CI confirms a read-only **stacked PR compatibility snapshot** only. It cannot infer provider real-world authorization, regulatory compliance, customer data retention policy, rate limiting, certificate renewal, load capacity, SLOs, disaster recovery or penetration-test results. In particular, **do not treat a green synthetic IdP/CI run as approval for customer authentication**.
 
 ## Known release blockers
-- Unreviewed and unmerged PR chain, including parent prerequisites before #19.
+- Unreviewed/unmerged open PR chain #15 → #55; earlier merged baseline PRs require independent change/security audit, even though merged PR #13 ancestry is verified.
 - No real company IdP registration, credentials, MFA validation and consent.
 - No deployed public staging domain with certificate chain and reverse-proxy header trust.
 - No audited database backup/restore, rate limiting, structured monitoring and incident response.
 - No independent secure deployment/tenant-boundary review.
 
 Do not claim "production-ready" until these gates have been independently completed and persisted.
+
+## Expanded foundation verification (slice 037)
+
+The revision gate now verifies 37 distinct live checks: a pinned merged PR #13, its merge commit as a provable ancestor of live `main`, the correct first open PR #15 base, 16 open PRs (#15, #17, #18, #19, #20, #22, #23, #27, #33, #36, #40, #43, #48, #51, #53, #55), exact parent SHAs and the final three CI workflows. The `GitHubReader` specifically permits the GitHub compare `base...main` syntax while rejecting real `../` path traversal. Compare output is capped at 4 MiB and all failures are reported by sanitized check ID.
+
+The gate confirms **integratability of the pinned stacked branch topology** only. Concurrent commits to `main` do not automatically mean this stack can safely merge there; an integration candidate must be built separately from a freshly fetched `main`, with conflict resolution and the full positive/negative test matrix rerun on the integrated tree. The current gate performs no such merge and should not be used as an authorization for production deployment.
