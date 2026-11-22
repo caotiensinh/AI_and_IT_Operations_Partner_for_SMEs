@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "SEC-ASAHI-READINESS",
+  "title": "Asahi MFA deployment preflight and staging service-principal isolation",
+  "status": "IN_PROGRESS",
+  "level": "L2",
+  "scope": "Fail-closed HTTPS OIDC JWKS/CSRF config validation and isolated staging password-authenticated PostgreSQL service principals. No production provider, certificates, secret vault, load balancer or customer sign-off.",
+  "environment": "GitHub Actions unit/integration and disposable staging Compose; not production",
+  "commit_sha": "4c217d29990b4eabd5e06e89f1293dc6e9c63c8c",
+  "owner": "implementation-team",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "An enabled BFF without complete configuration and privilege preflight",
+      "when": "Startup attempts registration",
+      "then": "Startup fails before public approval routes are registered",
+      "verified": true,
+      "evidence": [
+        "https://github.com/caotiensinh/AI_and_IT_Operations_Partner_for_SMEs/commit/4c217d29990b4eabd5e06e89f1293dc6e9c63c8c/checks"
+      ]
+    },
+    {
+      "id": "AC-02",
+      "given": "Privileged/sharing PostgreSQL roles, wrong OIDC endpoint, unsigned JWKS or missing verified TLS setting",
+      "when": "The preflight examines the deployment config and role observations",
+      "then": "Unsafe configuration is denied",
+      "verified": true,
+      "evidence": [
+        "https://github.com/caotiensinh/AI_and_IT_Operations_Partner_for_SMEs/pull/70"
+      ]
+    },
+    {
+      "id": "AC-03",
+      "given": "Two real PostgreSQL 16 staging service logins with separate passwords",
+      "when": "Staging Compose runs isolated issuer/approver probes",
+      "then": "Each login has only its function grants; cross-role escalation is rejected",
+      "verified": true,
+      "evidence": [
+        "https://github.com/caotiensinh/AI_and_IT_Operations_Partner_for_SMEs/pull/71"
+      ]
+    },
+    {
+      "id": "AC-04",
+      "given": "Production network and authorized enterprise IdP with monitoring and storage",
+      "when": "Service deploys, restarts, rotates secrets and recovers from failure",
+      "then": "TLS verification, shared rate limit, audit, rollback and real user acceptance are evidenced",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "gates": {
+    "contract": true,
+    "persist": true,
+    "functional": true,
+    "security": true,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "blockers": [
+    "Staging password login checks run over private Compose network without production TLS verify-full",
+    "Preflight configuration flags are operator attestation, not proof of live ingress/rate-limiter/IdP compliance",
+    "No real provider E2E, restart/restore acceptance for approval service, or user sign-off"
+  ]
+}
