@@ -35,6 +35,11 @@ class StoredEvidenceVerification(unittest.TestCase):
             "idp":"CI header-token bypass; not real OIDC browser login",
             "production_ready":False,
             "source_sha":SHA,
+            "acceptance_status":"UNREVIEWED",
+            "archival_status":"NOT_VERIFIED",
+            "capture_integrity_verified":True,
+            "expected_screen_count":13,
+            "actual_screen_count":13,
             "screens":entries}))
         self.stored=store.persist(src,self.root,SHA)
     def test_archive_verified_readonly(self):
