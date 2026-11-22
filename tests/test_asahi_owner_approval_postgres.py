@@ -1,6 +1,7 @@
 """Spec 017 owner-only PostgreSQL verified-session approval regression."""
 import os
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -180,6 +181,22 @@ class OwnerApprovalTests(unittest.TestCase):
             self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
         self.assertFalse(self.call("approve_asahi_delivery_stepup",
             self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+
+    def test_concurrent_replay_at_most_one_success(self):
+        proof = self.issue("approve",self.digest,self.tenant,
+                           "email","tenant/alerts","tenant/secret")
+        self.assertIsNotNone(proof)
+        def consume(_):
+            return self.call("approve_asahi_delivery_stepup",self.digest,
+                             self.tenant,proof,"email","tenant/alerts","tenant/secret")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes=list(pool.map(consume,(1,2)))
+        self.assertEqual(sorted(outcomes),[False,True])
+        records=self.db.execute(
+            "SELECT count(*) FROM sme.asahi_delivery_policy_audit WHERE tenant_id=%s",
+            (self.tenant,),
+        ).fetchone()[0]
+        self.assertEqual(records,1)
 
     def test_proof_action_expiry_and_revoked_session(self):
         proof=self.issue("revoke",self.digest,self.tenant)
