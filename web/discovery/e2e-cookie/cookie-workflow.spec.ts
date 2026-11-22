@@ -1,15 +1,15 @@
 import {test,expect} from "@playwright/test";
 import {readFileSync} from "node:fs";
 
-type Fixture={tenant:string;site:string;token:string};
+type Fixture={tenant:string;site:string;token:string;token_negative:string};
 function fixture():Fixture{
   const path=process.env.SME_E2E_FIXTURE_PATH;
   if(!path)throw new Error("SME_E2E_FIXTURE_PATH is required");
   return JSON.parse(readFileSync(path,"utf8")) as Fixture;
 }
 const origin="https://127.0.0.1:5174";
-async function issueExistingSyntheticSession(context:import("@playwright/test").BrowserContext){
-  const value=fixture().token;
+async function issueExistingSyntheticSession(context:import("@playwright/test").BrowserContext, negative=false){
+  const value=negative?fixture().token_negative:fixture().token;
   await context.addCookies([{
     name:"__Host-sme_session",value,url:origin,
     secure:true,httpOnly:true,sameSite:"Lax"
@@ -75,7 +75,7 @@ test("HTTPS cookie mode: select tenant, create, source, approve, logout",async({
 
 test("HTTPS cookie mode denies forged writes without CSRF and wrong Origin",async({page,context})=>{
   const seeded=fixture();
-  await issueExistingSyntheticSession(context);
+  await issueExistingSyntheticSession(context,true);
   await page.goto("/");
   await expect(page.getByRole("button",{name:"Synthetic test tenant"})).toBeVisible();
   const session=await context.request.get(origin+"/auth/session/tenants");
