@@ -71,6 +71,7 @@ GRANT EXECUTE ON FUNCTION sme.revoke_asahi_delivery(bytea,uuid) TO sme_app;
 -- Correct the Spec 016 BEFORE INSERT audit duplication under INSERT ON CONFLICT.
 -- Audit only the final physical operation. Keep safety checks BEFORE mutations.
 DROP TRIGGER IF EXISTS trg_asahi_delivery_policy_audit ON sme.asahi_delivery_destinations;
+DROP TRIGGER IF EXISTS trg_asahi_delivery_policy_guard ON sme.asahi_delivery_destinations;
 CREATE OR REPLACE FUNCTION sme.guard_asahi_delivery_policy()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,sme AS $
