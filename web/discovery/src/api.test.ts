@@ -1,5 +1,5 @@
 import {describe,it,expect,vi,afterEach} from "vitest";
-import {DiscoveryClient,normalizeError,validUuid} from "./api";
+import {DiscoveryClient,discoverBrowserSession,logoutBrowserSession,normalizeError,validUuid} from "./api";
 
 afterEach(()=>vi.unstubAllGlobals());
 const config={tenantId:"123e4567-e89b-42d3-a456-426614174000",token:"example-only-token"};
@@ -57,5 +57,35 @@ describe("input and authorization boundary",()=>{
     expect(page.sources[0].document_label).toBe("Source");
     const [url]=fake.mock.calls[0] as unknown as [string];
     expect(url).toContain("/research-cases/"+config.tenantId+"/sources?limit=50&after=");
+  });
+  it("browser-cookie API never adds Authorization and includes CSRF on mutations",async()=>{
+    const fake=vi.fn(async()=>({ok:true,json:async()=>({case_id:"synthetic"})}));
+    vi.stubGlobal("fetch",fake);
+    await new DiscoveryClient({tenantId:config.tenantId,csrfToken:"csrf-value"})
+      .createCase(config.tenantId,"Synthetic","OTHER","synthetic-idempotency-key");
+    const [,options]=fake.mock.calls[0] as unknown as [string,RequestInit];
+    const headers=options.headers as Record<string,string>;
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers["X-CSRF-Token"]).toBe("csrf-value");
+    expect(options.credentials).toBe("same-origin");
+  });
+  it("session bootstrap and logout never return or require opaque bearer",async()=>{
+    const calls=vi.fn()
+      .mockResolvedValueOnce({ok:true,json:async()=>({
+        tenants:[{id:config.tenantId,label:"Synthetic"}],csrf_token:"csrf-token"
+      })})
+      .mockResolvedValueOnce({ok:true,status:204});
+    vi.stubGlobal("fetch",calls);
+    const session=await discoverBrowserSession();
+    expect(session?.tenants[0].label).toBe("Synthetic");
+    await logoutBrowserSession(session!.csrf_token);
+    const [url,options]=calls.mock.calls[1] as [string,RequestInit];
+    expect(url).toBe("/auth/session/logout");
+    expect((options.headers as Record<string,string>)["X-CSRF-Token"]).toBe("csrf-token");
+    expect((options.headers as Record<string,string>).Authorization).toBeUndefined();
+  });
+  it("no cookie session is a normal signed-out state",async()=>{
+    vi.stubGlobal("fetch",vi.fn(async()=>({ok:false,status:401})));
+    await expect(discoverBrowserSession()).resolves.toBeNull();
   });
 });
