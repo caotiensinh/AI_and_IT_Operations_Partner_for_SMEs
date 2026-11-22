@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS ix_asahi_stepup_expiry
 REVOKE ALL ON sme.asahi_stepup_proofs
  FROM PUBLIC,sme_app,sme_auth,sme_ingest,sme_dispatch,sme_approval,sme_stepup;
 ALTER TABLE sme.asahi_stepup_proofs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sme.asahi_stepup_proofs FORCE ROW LEVEL SECURITY;
+-- SECURITY DEFINER migration owner must access rows; runtime roles have no table grants.
 
 -- The role sme_stepup is intentionally NOT granted to an application login.
 -- A trusted service must verify fresh IdP MFA before calling this function.
