@@ -56,7 +56,7 @@ class OwnerApprovalTests(unittest.TestCase):
             (self.tenant,self.role_id,self.actor),
         )
 
-    def call(self, fn, *args, role="sme_app"):
+    def call(self, fn, *args, role="sme_approval"):
         with psycopg.connect(DSN) as conn:
             with conn.transaction():
                 conn.execute("SET LOCAL ROLE " + role)
@@ -153,7 +153,7 @@ class OwnerApprovalTests(unittest.TestCase):
         self.assertFalse(self.revoke(tenant=uuid4()))
 
     def test_runtime_roles_no_direct_access(self):
-        for role in ("sme_auth","sme_ingest","sme_dispatch"):
+        for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch"):
             with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
                 self.approve(role=role)
         with self.assertRaises(psycopg.errors.InsufficientPrivilege):
