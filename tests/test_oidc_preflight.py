@@ -78,7 +78,7 @@ class PreflightTests(unittest.TestCase):
             return FakeDB("sme_app" if "app_role" in dsn else "sme_auth")
         report=run_preflight(ready_env(),provider_http=HTTP(),db_connect=connect)
         self.assertTrue(report.ready,report.public_dict())
-        self.assertEqual(len(report.checks),20)
+        self.assertEqual(len(report.checks),22)
         self.assertTrue(all(c.passed for c in report.checks))
 
     def test_unprivileged_read_only_preflight_cannot_be_skipped_to_ready(self):
