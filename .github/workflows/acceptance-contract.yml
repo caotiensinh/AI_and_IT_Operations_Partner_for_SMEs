@@ -1,0 +1,27 @@
+name: Acceptance governance contract
+on:
+  push:
+    paths:
+      - "acceptance/**"
+      - "scripts/check_acceptance.py"
+      - "tests/test_acceptance_contract.py"
+      - ".github/workflows/acceptance-contract.yml"
+  pull_request:
+    paths:
+      - "acceptance/**"
+      - "scripts/check_acceptance.py"
+      - "tests/test_acceptance_contract.py"
+      - ".github/workflows/acceptance-contract.yml"
+permissions:
+  contents: read
+jobs:
+  acceptance-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p test_acceptance_contract.py -v
+      - run: python scripts/check_acceptance.py
+      # Never use schema PASS as a substitute for independent user acceptance.
