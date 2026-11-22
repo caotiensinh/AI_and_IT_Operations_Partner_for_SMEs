@@ -1,6 +1,9 @@
 """Spec 024: deployment preflight must fail closed on credentials and grants."""
 import unittest
+import json
 from dataclasses import replace
+from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.algorithms import RSAAlgorithm
 from sme_partner.asahi_stepup_preflight import (
     PreflightDenied, StepupProductionConfig, verify_production_stepup_connections
 )
@@ -24,13 +27,16 @@ class FakeConn:
 
 class DeploymentGateTests(unittest.TestCase):
     def setUp(self):
+        key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+        jwk=json.loads(RSAAlgorithm.to_jwk(key.public_key()))
+        jwk.update({"kid":"pinned","alg":"RS256","use":"sig"})
         self.config=StepupProductionConfig(
             public_origin="https://app.example",
             authorization_endpoint="https://id.example/authorize",
             token_endpoint="https://id.example/token",
             redirect_uri="https://app.example/auth/asahi/stepup/callback",
             oidc=OIDCConfig("https://id.example","sme-web",
-                {"keys":[{"kty":"RSA","kid":"pinned","alg":"RS256","use":"sig"}]}),
+                {"keys":[jwk]}),
             csrf_key=b"k"*32,
             issuer_database_dsn=ISSUER_DSN,
             approval_database_dsn=APPROVAL_DSN,
