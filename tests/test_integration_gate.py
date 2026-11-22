@@ -18,16 +18,16 @@ class SyntheticReader:
         self.calls=[]
         self.prs={}
         prior=None
-        for node in manifest["pull_requests"]:
+        for index,node in enumerate(manifest["pull_requests"]):
+            ref=(manifest["pull_requests"][index+1]["base"]
+                 if index+1<len(manifest["pull_requests"]) else "feat/oidc-deployment-preflight-035")
             self.prs[node["number"]]={
                 "number":node["number"],"state":"open","merged_at":None,
                 "mergeable":True,
-                "head":{"sha":node["head"],"ref":"feat/branch-"+str(node["number"]),
+                "head":{"sha":node["head"],"ref":ref,
                         "repo":{"full_name":manifest["repository"]}},
                 "base":{"ref":node["base"],"sha":prior["head"] if prior else "0"*40},
             }
-            if prior:
-                self.prs[node["number"]]["base"]["ref"]="feat/branch-"+str(prior["number"])
             prior=node
         self.runs=runs if runs is not None else [
             {"name":name,"head_sha":manifest["pull_requests"][-1]["head"],
