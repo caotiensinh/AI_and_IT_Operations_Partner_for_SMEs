@@ -3,7 +3,7 @@
   "id": "EXAMPLE-ONLY",
   "title": "Template — replace with scoped task",
   "status": "IN_PROGRESS",
-  "level": "L1",
+  "level": "L0",
   "scope": "Single narrowly testable feature",
   "environment": "staging",
   "commit_sha": "",
