@@ -48,24 +48,22 @@ class EvidenceIntegrityTests(unittest.TestCase):
         self.assertEqual(result["archive"],"NOT_VERIFIED")
         self.assertEqual(result["human_acceptance"],"PENDING")
 
-    def test_missing_duplicate_and_unknown_capture_rejected(self):
-        for variant in ("missing","duplicate","unknown"):
-            with self.subTest(variant=variant):
-                original = json.loads(json.dumps(self.manifest))
-                if variant=="missing":
-                    (self.directory / (original["screens"][0]["file"])).unlink()
-                elif variant=="duplicate":
-                    original["screens"][1]["name"]=original["screens"][0]["name"]
-                    self.manifest=original
-                    self.write()
-                else:
-                    original["screens"][1]["name"]="../../escape"
-                    self.manifest=original
-                    self.write()
-                with self.assertRaises(ValueError):
-                    validator.validate(self.directory,SHA)
-                self.manifest = json.loads(json.dumps(original)) if variant=="missing" else original
-                self.setUp()
+    def test_missing_capture_rejected(self):
+        (self.directory / self.manifest["screens"][0]["file"]).unlink()
+        with self.assertRaises(ValueError):
+            validator.validate(self.directory,SHA)
+
+    def test_duplicate_capture_rejected(self):
+        self.manifest["screens"][1]["name"]=self.manifest["screens"][0]["name"]
+        self.write()
+        with self.assertRaises(ValueError):
+            validator.validate(self.directory,SHA)
+
+    def test_unsafe_capture_name_rejected(self):
+        self.manifest["screens"][1]["name"]="../../escape"
+        self.write()
+        with self.assertRaises(ValueError):
+            validator.validate(self.directory,SHA)
 
     def test_changed_bytes_sha_mismatch_denied(self):
         path=self.directory/self.manifest["screens"][0]["file"]
