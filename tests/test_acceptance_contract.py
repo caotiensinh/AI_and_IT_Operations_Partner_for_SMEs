@@ -73,5 +73,16 @@ class AcceptanceContractTests(unittest.TestCase):
             cmd=[sys.executable,str(ROOT/"scripts/check_acceptance.py"),"--directory",d]
             self.assertEqual(subprocess.run(cmd,capture_output=True).returncode,2)
 
+    def test_existing_ui_records_remain_unaccepted_without_live_evidence(self):
+        for record_id in ("UI-OVERVIEW", "UI-ASSETS", "UI-MONITORING"):
+            with self.subTest(record=record_id):
+                record = json.loads((ROOT / "acceptance/records" / (record_id + ".json")).read_text(encoding="utf-8"))
+                self.assertEqual(record["id"], record_id)
+                self.assertEqual(record["level"], "L1")
+                self.assertEqual(record["status"], "IN_PROGRESS")
+                self.assertFalse(mod.validate(record))
+                self.assertTrue(record["blockers"])
+                self.assertTrue(all(not criterion["verified"] for criterion in record["criteria"]))
+
 if __name__ == "__main__":
     unittest.main()
