@@ -14,7 +14,7 @@ export type RequirementPage = Page<{requirements:Requirement[]}>;
 export type Config = {tenantId:string; token?:string; csrfToken?:string};
 export type TenantChoice = {id:string;label:string};
 export type BrowserSession = {tenants:TenantChoice[];csrf_token:string};
-export const BROWSER_COOKIE_MODE = import.meta.env.VITE_DISCOVERY_AUTH_MODE === "cookie";
+export const BROWSER_COOKIE_MODE = import.meta.env.VITE_DISCOVERY_AUTH_MODE !== "pilot";
 export async function discoverBrowserSession():Promise<BrowserSession|null> {
   const response=await fetch("/auth/session/tenants",{credentials:"same-origin",cache:"no-store"});
   if(response.status===401)return null;
