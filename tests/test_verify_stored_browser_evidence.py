@@ -1,6 +1,7 @@
 """Independent read-only archival checks; corruption must fail closed."""
 import importlib.util
 import json
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -14,7 +15,7 @@ import verify_stored_browser_evidence as verifier
 SHA="a"*40
 
 def png(w,h):
-    return b"\x89PNG\r\n\x1a\n"+b"\x00\x00\x00\x0dIHDR"+w.to_bytes(4,"big")+h.to_bytes(4,"big")+b"\x08\x02\x00\x00\x00"+b"\x00"*8
+    return b"\x89PNG\r\n\x1a\n"+b"\x00\x00\x00\x0dIHDR"+w.to_bytes(4,"big")+h.to_bytes(4,"big")+b"\x08\x02\x00\x00\x00"+b"\x00"*8+b"\x00"*5000
 
 class StoredEvidenceVerification(unittest.TestCase):
     def setUp(self):
@@ -27,7 +28,7 @@ class StoredEvidenceVerification(unittest.TestCase):
         for name in sorted(pack.NAMES):
             w,h=(390,844) if name=="unauthorized-390x844" else tuple(map(int,name.rsplit("-",1)[1].split("x")))
             (src/(name+".png")).write_bytes(png(w,h))
-            entries.append({"name":name,"viewport":{"width":w,"height":h},"source":"synthetic CI fixture"})
+            entries.append({"name":name,"file":name+".png","viewport":{"width":w,"height":h},"actual_png":{"width":w,"height":h,"bytes":len(png(w,h)),"sha256":hashlib.sha256(png(w,h)).hexdigest()},"source":"synthetic CI fixture"})
         (src/"manifest.json").write_text(json.dumps({
             "evidence_type":"INTEGRATION_TEST_NOT_USER_ACCEPTANCE",
             "synthetic_data":True,
