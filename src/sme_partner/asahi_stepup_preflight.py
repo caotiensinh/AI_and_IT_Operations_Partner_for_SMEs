@@ -69,6 +69,8 @@ class StepupProductionConfig:
             and key.get("alg", "RS256") == "RS256"
             and key.get("use", "sig") == "sig"
             and isinstance(key.get("kid"), str) and key["kid"]
+            and isinstance(key.get("n"), str) and len(key["n"]) >= 300
+            and isinstance(key.get("e"), str) and key["e"] in ("AQAB","Aw")
             for key in self.oidc.jwks.get("keys", [])
         ):
             raise PreflightDenied("pinned RS256 JWKS required")
@@ -78,7 +80,14 @@ class StepupProductionConfig:
             if not isinstance(dsn, str) or len(dsn) < 24:
                 raise PreflightDenied("separate DB principals required")
             # Production DB principals MUST be authenticated over TLS.
-            if not dsn.startswith("postgresql://") or "sslmode=verify-full" not in dsn:
+            parsed = urlsplit(dsn)
+            if (parsed.scheme != "postgresql" or not parsed.hostname or
+                not parsed.username or not parsed.password or
+                parsed.fragment or parsed.path != "/sme"):
+                raise PreflightDenied("invalid PostgreSQL connection")
+            from urllib.parse import parse_qs
+            params = parse_qs(parsed.query, keep_blank_values=True)
+            if params.get("sslmode") != ["verify-full"]:
                 raise PreflightDenied("verified PostgreSQL TLS required")
         if hmac.compare_digest(
             hashlib.sha256(self.issuer_database_dsn.encode()).digest(),
@@ -140,7 +149,10 @@ def verify_production_stepup_connections(
         raise PreflightDenied("database permission inspection incomplete")
     issuer, approval = observations
     if (issuer[0] == approval[0] or issuer[1] == approval[1]
-        or any(row[2] is not False for row in observations)):
+        or any(row[2] is not False for row in observations)
+        or any(row[1] in ("postgres","sme_app","sme_auth","sme_dispatch",
+                           "sme_ingest","sme_approval","sme_stepup")
+               for row in observations)):
         raise PreflightDenied("service roles are shared or privileged")
     # index 3: proof issuance, 4: apply approval, 5: challenge start,
     # 6: DB-bound identity lookup, 7-9: forbidden direct table access.
