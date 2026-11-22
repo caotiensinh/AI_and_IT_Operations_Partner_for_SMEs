@@ -89,6 +89,6 @@ END $$;
 
 REVOKE ALL ON FUNCTION sme.claim_asahi_alert(uuid,uuid,integer) FROM PUBLIC,sme_app,sme_auth,sme_ingest;
 REVOKE ALL ON FUNCTION sme.finish_asahi_alert(bigint,uuid,boolean,integer) FROM PUBLIC,sme_app,sme_auth,sme_ingest;
-GRANT EXECUTE ON FUNCTION sme.claim_asahi_alert(uuid,integer) TO sme_dispatch;
+GRANT EXECUTE ON FUNCTION sme.claim_asahi_alert(uuid,uuid,integer) TO sme_dispatch;
 GRANT EXECUTE ON FUNCTION sme.finish_asahi_alert(bigint,uuid,boolean,integer) TO sme_dispatch;
 COMMIT;
