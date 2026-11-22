@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "repository": "caotiensinh/AI_and_IT_Operations_Partner_for_SMEs",
+  "description": "Read-only integration evidence for currently open stacked discovery/OIDC PRs, not authorization to merge.",
+  "pull_requests": [
+    {
+      "number": 19,
+      "head": "7fb9a3ba075f5f8377fa857776f641bd98aaa275",
+      "base": "feat/discovery-idempotency-018"
+    },
+    {
+      "number": 20,
+      "head": "6f644b944a39c2b69db0110e5f1f012773e8eb19",
+      "base": "feat/discovery-source-intake-019"
+    },
+    {
+      "number": 22,
+      "head": "b310efd1a26fdbbff994ec99966ba97afe397dd0",
+      "base": "feat/discovery-requirement-intake-020"
+    },
+    {
+      "number": 23,
+      "head": "40308bddd430b40d31e9002a1a1386efc5e08ab2",
+      "base": "feat/discovery-requirement-review-021"
+    },
+    {
+      "number": 27,
+      "head": "26d22cdfee6697f7011830d2de55b224f31ef3a8",
+      "base": "feat/discovery-review-history-023"
+    },
+    {
+      "number": 33,
+      "head": "a1e25259e10efad5a64916c020dafcff7ba23373",
+      "base": "feat/discovery-workspace-ui-024"
+    },
+    {
+      "number": 36,
+      "head": "3f1e6c71205af27ad82ea7fb4f39524c4086fcff",
+      "base": "feat/discovery-browser-e2e-028"
+    },
+    {
+      "number": 40,
+      "head": "bde3a4b3bea70784b8e22839f3d892b03c3573bb",
+      "base": "feat/discovery-site-source-selection-029"
+    },
+    {
+      "number": 43,
+      "head": "6609b8c2b3ae28191f87546dfe6421a8b1aea6aa",
+      "base": "feat/oidc-browser-bridge-030"
+    },
+    {
+      "number": 48,
+      "head": "7d4c655df9eb388dac812ad87314fc7b3581176b",
+      "base": "feat/discovery-cookie-bff-031"
+    },
+    {
+      "number": 51,
+      "head": "3fb9bf36fc453884cbbcea220be17fb1947139b4",
+      "base": "feat/discovery-https-cookie-e2e-032"
+    },
+    {
+      "number": 53,
+      "head": "084bc7c65b9a2e7cf9e59dbd011c0a64fc80b974",
+      "base": "feat/discovery-oidc-realflow-e2e-033"
+    },
+    {
+      "number": 55,
+      "head": "595416ddc3b6932420ff32b4cea7e02524abafcd",
+      "base": "feat/oidc-pinned-provider-adapter-034"
+    }
+  ],
+  "terminal_ci": {
+    "pr": 55,
+    "workflows": [
+      "Tenant PostgreSQL RLS",
+      "Integration kernel tests",
+      "OIDC identity verification"
+    ]
+  }
+}
