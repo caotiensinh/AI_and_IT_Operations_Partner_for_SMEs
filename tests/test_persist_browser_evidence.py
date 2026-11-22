@@ -18,7 +18,7 @@ pack=load("package_browser_evidence","scripts/package_browser_evidence.py")
 archive=load("persist_browser_evidence","scripts/persist_browser_evidence.py")
 SHA="a"*40
 def png(width,height):
-    return b"\x89PNG\r\n\x1a\n"+b"\x00\x00\x00\x0dIHDR"+width.to_bytes(4,"big")+height.to_bytes(4,"big")+b"\x08\x02\x00\x00\x00"+b"\x00"*8
+    return b"\x89PNG\r\n\x1a\n"+b"\x00\x00\x00\x0dIHDR"+width.to_bytes(4,"big")+height.to_bytes(4,"big")+b"\x08\x02\x00\x00\x00"+b"\x00"*8+b"\x00"*5000
 
 class PersistEvidenceTests(unittest.TestCase):
     def setUp(self):
@@ -30,8 +30,8 @@ class PersistEvidenceTests(unittest.TestCase):
         for name in sorted(pack.NAMES):
             w,h=(390,844) if name.startswith("unauthorized") else tuple(map(int,name.rsplit("-",1)[1].split("x")))
             (self.source/(name+".png")).write_bytes(png(w,h))
-            screens.append({"name":name,"viewport":{"width":w,"height":h},"source":"synthetic CI fixture"})
-        (self.source/"manifest.json").write_text(json.dumps({"evidence_type":"INTEGRATION_TEST_NOT_USER_ACCEPTANCE","synthetic_data":True,"idp":"CI header-token bypass; not real OIDC browser login","production_ready":False,"source_sha":SHA,"screens":screens}))
+            screens.append({"name":name,"file":name+".png","viewport":{"width":w,"height":h},"actual_png":{"width":w,"height":h,"bytes":len(png(w,h)),"sha256":hashlib.sha256(png(w,h)).hexdigest()},"source":"synthetic CI fixture"})
+        (self.source/"manifest.json").write_text(json.dumps({"evidence_type":"INTEGRATION_TEST_NOT_USER_ACCEPTANCE","synthetic_data":True,"idp":"CI header-token bypass; not real OIDC browser login","production_ready":False,"source_sha":SHA,"acceptance_status":"UNREVIEWED","archival_status":"NOT_VERIFIED","capture_integrity_verified":True,"expected_screen_count":13,"actual_screen_count":13,"screens":screens}))
     def test_persist_and_verify(self):
         dest=archive.persist(self.source,self.root,SHA)
         self.assertEqual(len(list(dest.iterdir())),15)
