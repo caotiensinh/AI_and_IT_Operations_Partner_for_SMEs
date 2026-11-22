@@ -1,6 +1,7 @@
 """Spec 017 owner-only PostgreSQL verified-session approval regression."""
 import os
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -65,17 +66,29 @@ class OwnerApprovalTests(unittest.TestCase):
                     "SELECT sme." + fn + "(" + placeholders + ")",args
                 ).fetchone()[0]
 
+    def issue(self, action, digest, tenant, channel=None, destination=None, secret=None, lifetime=60):
+        return self.call("issue_asahi_stepup", digest, tenant, action,
+                         channel, destination, secret, lifetime, role="sme_stepup")
+
     def approve(self, digest=None, tenant=None, channel="email",
                 destination="tenant/alerts", secret="tenant/secret", role="sme_approval"):
-        return self.call("approve_asahi_delivery",
-                         self.digest if digest is None else digest,
-                         self.tenant if tenant is None else tenant,
-                         channel,destination,secret,role=role)
+        digest = self.digest if digest is None else digest
+        tenant = self.tenant if tenant is None else tenant
+        if role != "sme_approval":
+            return self.call("approve_asahi_delivery_stepup", digest, tenant, uuid4(),
+                             channel, destination, secret, role=role)
+        proof = self.issue("approve", digest, tenant, channel, destination, secret)
+        return bool(proof) and self.call("approve_asahi_delivery_stepup", digest,
+                                         tenant, proof, channel, destination, secret, role=role)
 
     def revoke(self, digest=None, tenant=None, role="sme_approval"):
-        return self.call("revoke_asahi_delivery",
-                         self.digest if digest is None else digest,
-                         self.tenant if tenant is None else tenant,role=role)
+        digest = self.digest if digest is None else digest
+        tenant = self.tenant if tenant is None else tenant
+        if role != "sme_approval":
+            return self.call("revoke_asahi_delivery_stepup", digest, tenant, uuid4(), role=role)
+        proof = self.issue("revoke", digest, tenant)
+        return bool(proof) and self.call("revoke_asahi_delivery_stepup", digest,
+                                         tenant, proof, role=role)
 
     def test_owner_approves_and_revokes_with_audit(self):
         self.assertTrue(self.approve())
@@ -151,6 +164,77 @@ class OwnerApprovalTests(unittest.TestCase):
     def test_wrong_tenant_denied(self):
         self.assertFalse(self.approve(tenant=uuid4()))
         self.assertFalse(self.revoke(tenant=uuid4()))
+
+    def test_single_use_proof_and_payload_binding(self):
+        proof = self.issue("approve", self.digest, self.tenant,
+                           "email", "tenant/alerts", "tenant/secret")
+        self.assertIsNotNone(proof)
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"webhook","tenant/alerts","tenant/secret"))
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/changed","tenant/secret"))
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,uuid4(),proof,"email","tenant/alerts","tenant/secret"))
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.other_digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+        self.assertTrue(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+
+    def test_concurrent_replay_at_most_one_success(self):
+        proof = self.issue("approve",self.digest,self.tenant,
+                           "email","tenant/alerts","tenant/secret")
+        self.assertIsNotNone(proof)
+        def consume(_):
+            return self.call("approve_asahi_delivery_stepup",self.digest,
+                             self.tenant,proof,"email","tenant/alerts","tenant/secret")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes=list(pool.map(consume,(1,2)))
+        self.assertEqual(sorted(outcomes),[False,True])
+        records=self.db.execute(
+            "SELECT count(*) FROM sme.asahi_delivery_policy_audit WHERE tenant_id=%s",
+            (self.tenant,),
+        ).fetchone()[0]
+        self.assertEqual(records,1)
+
+    def test_proof_action_expiry_and_revoked_session(self):
+        proof=self.issue("revoke",self.digest,self.tenant)
+        self.assertIsNotNone(proof)
+        self.assertFalse(self.call("approve_asahi_delivery_stepup",
+            self.digest,self.tenant,proof,"email","tenant/alerts","tenant/secret"))
+        self.db.execute("UPDATE sme.asahi_stepup_proofs SET issued_at=now()-interval '120 seconds', expires_at=now()-interval '1 second' WHERE id=%s",
+                        (proof,))
+        self.assertFalse(self.call("revoke_asahi_delivery_stepup",
+                                   self.digest,self.tenant,proof))
+        self.assertIsNone(self.issue("approve",self.other_digest,self.tenant,
+                        "email","tenant/alerts","tenant/secret"))
+        self.db.execute("UPDATE sme.sessions SET revoked_at=now() WHERE token_digest=%s",
+                        (self.digest,))
+        self.assertIsNone(self.issue("approve",self.digest,self.tenant,
+                        "email","tenant/alerts","tenant/secret"))
+
+    def test_proof_issuer_and_legacy_approval_are_privilege_separated(self):
+        for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch","sme_approval"):
+            with self.subTest(role=role),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                self.call("issue_asahi_stepup",self.digest,self.tenant,"approve",
+                          "email","tenant/alerts","tenant/secret",60,role=role)
+        for fn,args in (
+            ("approve_asahi_delivery",(self.digest,self.tenant,"email","tenant/alerts","tenant/secret")),
+            ("revoke_asahi_delivery",(self.digest,self.tenant)),
+        ):
+            with self.subTest(fn=fn),self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                self.call(fn,*args,role="sme_approval")
+
+    def test_invalid_proof_request_rejected(self):
+        for lifetime in (0,14,121):
+            self.assertIsNone(self.issue("approve",self.digest,self.tenant,
+                "email","tenant/alerts","tenant/secret",lifetime=lifetime))
+        self.assertIsNone(self.issue("revoke",self.digest,self.tenant,
+                "email","tenant/alerts","tenant/secret"))
+        self.assertIsNone(self.issue("approve",self.digest,self.tenant,
+                "email","tenant/../unsafe","tenant/secret"))
+        self.assertIsNone(self.issue("unknown",self.digest,self.tenant))
 
     def test_runtime_roles_no_direct_access(self):
         for role in ("sme_app","sme_auth","sme_ingest","sme_dispatch"):
