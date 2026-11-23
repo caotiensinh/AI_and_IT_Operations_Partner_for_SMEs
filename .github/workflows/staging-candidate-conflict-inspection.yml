@@ -1,0 +1,53 @@
+name: Staging candidate 3-way conflict inspection
+on:
+  push:
+    branches:
+      - integration/discovery-staging-20261122
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect-merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify pinned foundation and feature source before local merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_MAIN=778933534d167315144fc692d350ba1803b17e94
+          EXPECTED_HEAD=a75015371c32e77a751c38a06a32d1166a1e08cf
+          git cat-file -e "$EXPECTED_MAIN^{commit}"
+          git fetch --no-tags origin "$EXPECTED_HEAD"
+          git cat-file -e "$EXPECTED_HEAD^{commit}"
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
+          echo "Pinned main ancestor confirmed; Discovery/OIDC HEAD fetched."
+      - name: Attempt three-way merge in disposable runner only
+        shell: bash
+        run: |
+          set -uo pipefail
+          SOURCE=a75015371c32e77a751c38a06a32d1166a1e08cf
+          git config user.name staging-readonly-inspector
+          git config user.email staging-inspector@users.noreply.github.com
+          if git merge --no-commit --no-ff "$SOURCE" > /tmp/staging-merge.stdout 2> /tmp/staging-merge.stderr; then
+            echo "MERGE_CONFLICTS=0" >> "$GITHUB_STEP_SUMMARY"
+            git diff --cached --stat | tail -30
+            echo "No conflict detected in disposable workspace."
+            exit 0
+          fi
+          echo "Three-way merge blocked. Unmerged paths:"
+          git diff --name-only --diff-filter=U | sort | tee /tmp/staging-conflict-paths.txt
+          echo "### Staging integration conflict report" >> "$GITHUB_STEP_SUMMARY"
+          echo "Base main: 778933534d167315144fc692d350ba1803b17e94" >> "$GITHUB_STEP_SUMMARY"
+          echo "Feature stack: a75015371c32e77a751c38a06a32d1166a1e08cf" >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/staging-conflict-paths.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+          count="$(wc -l < /tmp/staging-conflict-paths.txt)"
+          echo "CONFLICT_FILE_COUNT=$count"
+          test "$count" -gt 0 || { echo "Merge failed without unmerged paths"; cat /tmp/staging-merge.stderr; }
+          exit 1

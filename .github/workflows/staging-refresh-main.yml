@@ -1,0 +1,104 @@
+name: Staging refresh from pinned latest main and domain migration normalization
+on:
+  push:
+    paths:
+      - '.github/workflows/staging-refresh-main.yml'
+permissions:
+  contents: write
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/integration/discovery-staging-20261122'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sme_test
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@127.0.0.1:5432/sme_test
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify prior staging and pinned latest main snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/integration/discovery-staging-20261122
+          MAIN_SHA=4712bdefeead74275700bf47c2b6eab2c25e4149
+          git fetch --no-tags origin "$MAIN_SHA"
+          git cat-file -e "$MAIN_SHA^{commit}"
+          git merge-base --is-ancestor e53f64a1c638234ba143a2a86500f89fd8e4deb3 HEAD
+          echo "MAIN_SHA=$MAIN_SHA" >> "$GITHUB_ENV"
+          echo "STAGING_REMOTE_BASE=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git config user.name 'staging-integration-bot'
+          git config user.email 'staging-integration-bot@users.noreply.github.com'
+      - name: Reserve separate migration ranges before merging concurrently changed main
+        shell: bash
+        run: |
+          set -euo pipefail
+          SME_STAGING_NAMESPACE_V2=1 python scripts/rebase_staging_migration_namespace.py
+          git add -A
+          git commit -m "refactor(staging): isolate Discovery migration IDs 0100-0106"
+      - name: Merge pinned main commit into isolated candidate without rewriting main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git merge --no-commit --no-ff "$MAIN_SHA"; then
+            echo "LATEST_MAIN_MERGE=SUCCESS"
+          else
+            echo "LATEST_MAIN_MERGE=CONFLICT"
+            git diff --name-only --diff-filter=U | sort
+            exit 1
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+          python - <<'PY'
+          from pathlib import Path
+          names=sorted(p.name for p in Path('migrations').glob('*.sql'))
+          nums=[int(n.split('_',1)[0]) for n in names]
+          assert nums==list(range(1,22))+list(range(100,107)),nums
+          print('STAGING_MIGRATIONS=28; SHARED_ASAHI=0001-0021; DISCOVERY=0100-0106')
+          PY
+      - name: Run integrated backend regression with PostgreSQL 16
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e . 'psycopg[binary]>=3.2,<4' 'httpx>=0.27,<1' 'httpx2>=2.0,<3'
+          python -m unittest discover -s tests -v
+      - name: Run integrated frontend tests and production build
+        working-directory: web/discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run test
+          npm run build
+      - name: Verify concurrent branch state and persist staging-only merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/integration/discovery-staging-20261122
+          remote="$(git ls-remote origin refs/heads/integration/discovery-staging-20261122 | cut -f1)"
+          test "$remote" = "$STAGING_REMOTE_BASE"
+          git add -A
+          git commit -m "test(staging): integrate pinned latest main with distinct Discovery migration namespace"
+          result="$(git rev-parse HEAD)"
+          git push origin HEAD:refs/heads/integration/discovery-staging-20261122
+          echo "STAGING_REFRESHED_COMMIT=$result"
+          echo "### Validated integrated staging refresh" >> "$GITHUB_STEP_SUMMARY"
+          echo "new main baseline: $MAIN_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "staging merge commit: $result" >> "$GITHUB_STEP_SUMMARY"
+          echo "Backend/PostgreSQL and frontend unit/build PASS before non-forced staging push." >> "$GITHUB_STEP_SUMMARY"

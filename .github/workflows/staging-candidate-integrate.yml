@@ -1,0 +1,131 @@
+name: Staging candidate integration and validation
+on:
+  push:
+    paths:
+      - '.github/workflows/staging-candidate-integrate.yml'
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.ref == 'refs/heads/integration/discovery-staging-20261122'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sme_test
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@127.0.0.1:5432/sme_test
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin immutable input and prohibit updating main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/integration/discovery-staging-20261122
+          BASE_MAIN=778933534d167315144fc692d350ba1803b17e94
+          SOURCE=a75015371c32e77a751c38a06a32d1166a1e08cf
+          git fetch --no-tags origin "$SOURCE"
+          git cat-file -e "$SOURCE^{commit}"
+          git merge-base --is-ancestor "$BASE_MAIN" HEAD
+          printf 'SOURCE=%s\nBASE_MAIN=%s\n' "$SOURCE" "$BASE_MAIN" >> "$GITHUB_ENV"
+      - name: Verify all baseline PostgreSQL regression methods are retained before resolution
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "$BASE_MAIN:tests/test_discovery_postgres.py" > /tmp/sme-original-tests.py
+          git show "$SOURCE:tests/test_discovery_postgres.py" > /tmp/sme-feature-tests.py
+          python - <<'PY'
+          import ast
+          def tests(path):
+              source=open(path).read()
+              tree=ast.parse(source)
+              return {node.name:ast.dump(node,include_attributes=False)
+                  for suite in tree.body if isinstance(suite,ast.ClassDef)
+                  for node in suite.body if isinstance(node,ast.FunctionDef)
+                  and node.name.startswith('test_')}
+          main=tests('/tmp/sme-original-tests.py')
+          feature=tests('/tmp/sme-feature-tests.py')
+          assert len(main)>=14 and len(feature)>len(main)
+          missing=[name for name,body in main.items() if feature.get(name)!=body]
+          assert not missing, 'Baseline tests have been changed or lost: '+str(missing)
+          print('PRESERVED_BASELINE_TESTS='+str(len(main)))
+          print('ADDITIONAL_DISCOVERY_TESTS='+str(len(feature)-len(main)))
+          PY
+      - name: Merge only into staging and resolve the verified single test-file collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'staging-integration-bot'
+          git config user.email 'staging-integration-bot@users.noreply.github.com'
+          if git merge --no-commit --no-ff "$SOURCE"; then
+            echo 'No conflicts; staging merge is ready for tests'
+          else
+            git diff --name-only --diff-filter=U | sort > /tmp/sme-unmerged-paths
+            printf '%s\n' tests/test_discovery_postgres.py > /tmp/sme-allowed-paths
+            diff -u /tmp/sme-allowed-paths /tmp/sme-unmerged-paths
+            git checkout --theirs -- tests/test_discovery_postgres.py
+            git add tests/test_discovery_postgres.py
+            echo 'Resolved only pre-verified superset test file'
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+          echo 'Merged migration listing:'
+          find migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort
+          echo 'Discovery migration expectations:'
+          for file in migrations/0005_discovery_read_model.sql migrations/0008_discovery_read_model.sql migrations/0008_discovery_source_intake.sql; do
+            if test -f "$file"; then echo "PRESENT $file"; else echo "ABSENT $file"; fi
+          done
+          SME_STAGING_RECONCILE=1 python scripts/reconcile_staging_migrations.py
+          grep -q 'CREATE OR REPLACE FUNCTION sme.list_browser_session_tenants' migrations/0026_cookie_bff_tenants.sql
+          grep -q 'CREATE OR REPLACE FUNCTION sme.list_session_tenants' migrations/0006_tenant_selector.sql
+          grep -q 'sme.list_browser_session_tenants' src/sme_partner/discovery_bff.py
+          git add -A
+          echo 'STAGING_MERGE_TREE_READY=1' >> "$GITHUB_ENV"
+      - name: Install backend and run real PostgreSQL full regression on merged workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e . 'psycopg[binary]>=3.2,<4' 'httpx>=0.27,<1' 'httpx2>=2.0,<3'
+          python -m unittest discover -s tests -v
+      - name: Run frontend TypeScript, Vite and unit suite on merged workspace
+        working-directory: web/discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run test
+          npm run build
+      - name: Verify no concurrent staging mutation and persist integrated tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/integration/discovery-staging-20261122
+          test "$STAGING_MERGE_TREE_READY" = 1
+          expected="$(git rev-parse HEAD)"
+          actual="$(git ls-remote origin refs/heads/integration/discovery-staging-20261122 | cut -f1)"
+          test "$actual" = "$expected"
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "test(staging): merge verified Discovery/OIDC stack into isolated main snapshot"
+          result="$(git rev-parse HEAD)"
+          echo "STAGING_INTEGRATED_COMMIT=$result"
+          git push origin HEAD:refs/heads/integration/discovery-staging-20261122
+          echo "### Integrated candidate" >> "$GITHUB_STEP_SUMMARY"
+          echo "main baseline: $BASE_MAIN" >> "$GITHUB_STEP_SUMMARY"
+          echo "feature stack: $SOURCE" >> "$GITHUB_STEP_SUMMARY"
+          echo "integrated commit: $result" >> "$GITHUB_STEP_SUMMARY"
+          echo "PostgreSQL suite and frontend unit/build passed before staging-only push." >> "$GITHUB_STEP_SUMMARY"

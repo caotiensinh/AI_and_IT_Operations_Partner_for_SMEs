@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: sme-partner-integration-kernel
+Version: 0.1.0
+Requires-Python: >=3.12
+License-File: LICENSE
+Requires-Dist: PyJWT[crypto]==2.10.1
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: psycopg<4,>=3.2
+Dynamic: license-file
