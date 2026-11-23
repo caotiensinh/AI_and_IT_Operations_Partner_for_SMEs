@@ -77,24 +77,32 @@ jobs:
         run: |
           python scripts/validate_browser_evidence.py evidence/browser --sha "$CI_SOURCE_SHA"
           echo "CAPTURE_INTEGRITY=PASS; archive and independent review remain separate" >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate 13 PNG captures and package with checksums
+        run: |
+          python -m unittest discover -s tests -p test_browser_evidence_package.py -v
+          python scripts/package_browser_evidence.py \
+            --directory evidence/browser \
+            --output evidence/browser-evidence.zip \
+            --source-sha "$CI_SOURCE_SHA"
       - name: Upload real-browser synthetic fixture screenshots
         id: screenshot_archive
         if: always()
-        # Storage quota is an external evidence blocker, not a browser test failure.
-        # Never equate a green browser job with persisted screenshots.
-        continue-on-error: true
+        # This is a required evidence artifact: upload failure must fail the job.
         uses: actions/upload-artifact@v4
         with:
           name: sme-real-browser-synthetic-ci-evidence
-          path: evidence/browser/
+          path: |
+            evidence/browser/
+            evidence/browser-evidence.zip
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
       - name: Report evidence archival result
         if: always()
         run: |
           if [ "${{ steps.screenshot_archive.outcome }}" != "success" ]; then
-            echo "::warning::Browser assertions ran, but screenshot evidence could not be archived. UI acceptance remains IN_PROGRESS; no L4/L5 claim."
+            echo "::error::Screenshot artifact archive failed: UI evidence unavailable. CI must fail closed."
             echo "EVIDENCE_ARCHIVE=FAILED — No durable UI screenshots; approval prohibited." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           else
             echo "EVIDENCE_ARCHIVE=UPLOADED — Review images and SHA independently before any acceptance." >> "$GITHUB_STEP_SUMMARY"
           fi

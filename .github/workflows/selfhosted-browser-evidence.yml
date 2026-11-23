@@ -1,0 +1,98 @@
+name: Self-hosted browser evidence capture
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Evidence run purpose (synthetic CI data only)"
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: sme-synthetic-browser-evidence
+  cancel-in-progress: false
+jobs:
+  evidence:
+    # Operators must explicitly register a DEDICATED, isolated runner with label sme-evidence.
+    runs-on: [self-hosted, Linux, X64, sme-evidence]
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sme_browser
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      SME_TEST_DATABASE_DSN: postgresql://postgres:postgres@127.0.0.1:5432/sme_browser
+      SME_E2E_FIXTURE_MODE: disposable_ci_only
+      SME_E2E_FIXTURE_PATH: /tmp/sme-browser-${{ github.run_id }}.json
+      PYTHONPATH: src
+      SME_E2E_SCREENSHOT_DIR: /tmp/sme-browser-evidence-${{ github.run_id }}
+      CI_SOURCE_SHA: ${{ github.sha }}
+      SME_EVIDENCE_ROOT: ${{ vars.SME_EVIDENCE_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pre-provisioned durable evidence root
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SME_EVIDENCE_ROOT"
+          test "${SME_EVIDENCE_ROOT#/}" != "$SME_EVIDENCE_ROOT"
+          test "$SME_EVIDENCE_ROOT" != "/"
+          test -d "$SME_EVIDENCE_ROOT" && test ! -L "$SME_EVIDENCE_ROOT"
+          test -w "$SME_EVIDENCE_ROOT"
+          test "$SME_EVIDENCE_ROOT" != "$RUNNER_TEMP"
+          echo "Durable evidence root exists and is writable; owner must verify mount, backup and retention."
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated CI dependencies
+        run: python -m pip install -e . 'psycopg[binary]>=3.2,<4' 'uvicorn>=0.30,<1'
+      - name: Install browser dependencies
+        working-directory: frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save playwright@1.58.2 --no-audit --no-fund
+          npx playwright install chromium
+      - name: Seed disposable synthetic tenants
+        run: python scripts/seed_browser_e2e.py
+      - name: Run loopback-only API and frontend
+        shell: bash
+        run: |
+          python scripts/run_e2e_api.py >"$RUNNER_TEMP/sme-api.log" 2>&1 &
+          cd frontend
+          npm run dev -- --host 127.0.0.1 >"$RUNNER_TEMP/sme-ui.log" 2>&1 &
+      - name: Verify services responding
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8091/openapi.json >/dev/null 2>&1 &&
+               curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          tail -80 "$RUNNER_TEMP/sme-api.log" "$RUNNER_TEMP/sme-ui.log" || true
+          exit 1
+      - name: Real Chromium UI/API cross-tenant E2E
+        working-directory: frontend
+        run: node tests/browser_e2e.mjs
+      - name: Verify canonical Spec 027 screenshot integrity
+        run: python scripts/validate_browser_evidence.py "$SME_E2E_SCREENSHOT_DIR" --sha "$CI_SOURCE_SHA"
+      - name: Persist and verify on durable self-hosted storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/persist_browser_evidence.py --source "$SME_E2E_SCREENSHOT_DIR" --root "$SME_EVIDENCE_ROOT" --source-sha "$CI_SOURCE_SHA"
+          python scripts/verify_stored_browser_evidence.py --root "$SME_EVIDENCE_ROOT" --source-sha "$CI_SOURCE_SHA"
+          echo "EVIDENCE_ARCHIVE=LOCAL_VERIFIED (synthetic only); UI_ACCEPTANCE=UNREVIEWED" >> "$GITHUB_STEP_SUMMARY"
+      - name: Record failure diagnostics (no user secrets)
+        if: failure()
+        shell: bash
+        run: tail -80 "$RUNNER_TEMP/sme-api.log" "$RUNNER_TEMP/sme-ui.log" 2>/dev/null || true
