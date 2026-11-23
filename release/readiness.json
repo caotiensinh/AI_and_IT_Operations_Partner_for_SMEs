@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "environment": "production",
+  "status": "blocked",
+  "checks": {
+    "external_oidc_provider_e2e": false,
+    "trusted_https_ingress": false,
+    "distributed_rate_limiting": false,
+    "independent_security_review": false,
+    "production_role_and_secret_provisioning": false,
+    "backup_restore_and_incident_drill": false,
+    "multi_instance_observability": false,
+    "tenant_owner_acceptance": false
+  },
+  "evidence": {}
+}
