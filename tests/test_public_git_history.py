@@ -3,6 +3,7 @@ import importlib.util
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,10 +59,11 @@ class HistoryAuditTests(unittest.TestCase):
                             for values in findings.values() for v in values), findings)
 
     def test_history_oversized_blob_fails_closed(self):
-        self.commit("large-text.txt", "a" * (audit.MAX_SCAN_BYTES + 1))
-        findings, stats = audit.scan(self.root)
+        self.commit("large-text.txt", "a" * 2048)
+        with patch.object(audit, "MAX_HISTORY_SCAN_BYTES", 1024):
+            findings, stats = audit.scan(self.root)
         self.assertGreater(stats["oversized"], 0)
-        self.assertTrue(any("oversized blob not audited" in v
+        self.assertTrue(any("blob exceeds 64 MiB audit limit" in v
                             for values in findings.values() for v in values))
 
     def test_tracked_key_deleted_from_current_tree_fails_closed(self):
@@ -71,6 +73,21 @@ class HistoryAuditTests(unittest.TestCase):
         findings, _ = audit.scan(self.root)
         self.assertTrue(any("restricted historical filename" in v
                             for values in findings.values() for v in values))
+
+    def test_inline_fixture_marker_is_not_a_private_key(self):
+        self.commit("fixture.py",
+                    'sample = "' + '-----BEGIN PRIVATE KEY-----' + '"')
+        findings, _ = audit.scan(self.root)
+        self.assertFalse(any("private key PEM block" in issue
+                             for values in findings.values() for issue in values))
+
+    def test_full_multiline_pem_is_detected(self):
+        sample = ("-----BEGIN PRIVATE KEY-----\\n" + "a"*64 +
+                  "\\n-----END PRIVATE KEY-----")
+        self.commit("temp-key.txt", sample)
+        findings, _ = audit.scan(self.root)
+        self.assertTrue(any("private key PEM block" in issue
+                            for values in findings.values() for issue in values))
 
     def test_bad_git_directory_returns_error(self):
         with tempfile.TemporaryDirectory() as d:
