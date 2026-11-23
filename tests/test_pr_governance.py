@@ -25,7 +25,7 @@ class GovernanceTests(unittest.TestCase):
     def save(self):
         (self.root / "TEST-GOV.json").write_text(json.dumps(self.record), encoding="utf-8")
     def check(self, body=None, files=None):
-        return p.validate_pr(self.body if body is None else body, self.root, ["AGENTS.md"] if files is None else files, validator=a.validate)
+        return p.validate_pr(self.body if body is None else body, self.root, ["AGENTS.md", "acceptance/records/TEST-GOV.json"] if files is None else files, validator=a.validate)
     def test_in_progress_record_is_valid_but_not_accepted(self):
         self.assertEqual(self.check()["ids"],["TEST-GOV"])
         self.assertEqual(self.record["status"],"IN_PROGRESS")
@@ -43,6 +43,15 @@ class GovernanceTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.check("Change-Type: docs\nAcceptance-IDs: ../TEST-GOV\n")
     def test_no_changed_files_rejected(self):
         with self.assertRaises(ValueError): self.check(files=[])
+    def test_stale_record_reuse_rejected(self):
+        with self.assertRaisesRegex(ValueError, "must have a changed acceptance"):
+            self.check(files=["AGENTS.md"])
+    def test_partial_ids_without_changed_record_rejected(self):
+        record2 = dict(self.record)
+        record2["id"] = "TEST-SECOND"
+        (self.root / "TEST-SECOND.json").write_text(json.dumps(record2), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "must have a changed acceptance"):
+            self.check("Change-Type: governance\\nAcceptance-IDs: TEST-GOV, TEST-SECOND\\n")
     def test_forged_accepted_record_rejected(self):
         self.record["status"]="ACCEPTED"
         self.save()
