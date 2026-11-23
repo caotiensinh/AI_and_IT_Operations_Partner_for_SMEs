@@ -14,7 +14,9 @@ from pathlib import Path
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_public_repo_safety import MAX_SCAN_BYTES, inspect, dangerous_path
+from check_public_repo_safety import inspect, dangerous_path, TOKEN_MARKERS
+
+# Cover large historical files including images and archives as raw bytes.\n# A hard upper limit still fails closed instead of silently skipping.\nMAX_HISTORY_SCAN_BYTES = 64 * 1024 * 1024\nPEM_BLOCK = re.compile(\n    rb\"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\\r?\\n\"\n    rb\"(?:[A-Za-z0-9+/=]{20,}\\r?\\n)+\"\n    rb\"-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\"\n)\n\ndef inspect_historical_blob(path: str, data: bytes) -> list[str]:\n    # A prose/test-source string containing BEGIN PRIVATE KEY alone is not a\n    # PEM credential. Require a complete multiline base64-encoded PEM block.\n    base = [x for x in inspect(path, data) if x != 'private key block']\n    if PEM_BLOCK.search(data):\n        base.append('private key PEM block')\n    # inspect() skips binary files on NUL; scan their raw byte stream anyway.\n    if any(marker.search(data) for marker in TOKEN_MARKERS) and 'credential-looking token' not in base:\n        base.append('credential-looking token')\n    return base
 
 SHA_RE = re.compile(r"^[a-f0-9]{40,64}$")
 # Blob object names may be displayed for reproducibility; secret bytes never are.
@@ -85,7 +87,7 @@ def scan(root: Path) -> tuple[dict[str, list[str]], dict[str, int]]:
             size = int(parts[2])
             if size < 0 or size > 1_000_000_000:
                 raise AuditError("Unreasonable Git object size")
-            if size > MAX_SCAN_BYTES:
+            if size > MAX_HISTORY_SCAN_BYTES:
                 # Larger blobs are not silently declared clean.
                 # Stream and discard in bounded chunks.
                 left = size
@@ -107,9 +109,9 @@ def scan(root: Path) -> tuple[dict[str, list[str]], dict[str, int]]:
             blobs += 1
             if size > MAX_SCAN_BYTES:
                 # Conservative: cannot certify this blob with current detector.
-                findings["blob:" + oid] = ["oversized blob not audited"]
+                findings["blob:" + oid] = ["blob exceeds 64 MiB audit limit"]
                 continue
-            issues = inspect(known_path or "historical-blob", data)
+            issues = inspect_historical_blob(known_path or "historical-blob", data)
             if issues:
                 # Print only immutable object identifiers, not secret snippets.
                 findings["blob:" + oid] = issues
