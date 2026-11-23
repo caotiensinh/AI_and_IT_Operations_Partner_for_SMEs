@@ -51,7 +51,7 @@ class GovernanceTests(unittest.TestCase):
         record2["id"] = "TEST-SECOND"
         (self.root / "TEST-SECOND.json").write_text(json.dumps(record2), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "must have a changed acceptance"):
-            self.check("Change-Type: governance\\nAcceptance-IDs: TEST-GOV, TEST-SECOND\\n")
+            self.check("Change-Type: governance\nAcceptance-IDs: TEST-GOV, TEST-SECOND\n")
     def test_forged_accepted_record_rejected(self):
         self.record["status"]="ACCEPTED"
         self.save()
