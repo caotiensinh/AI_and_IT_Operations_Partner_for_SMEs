@@ -22,7 +22,7 @@ class HistoryAuditTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        git(self.root, "init", "-q")
+        git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "ci@example.invalid")
         git(self.root, "config", "user.name", "Disposable CI")
         self.commit("README.md", "Public documentation")
@@ -52,7 +52,7 @@ class HistoryAuditTests(unittest.TestCase):
         # Construct marker dynamically to avoid embedding a fake credential
         # as a contiguous token in the scanner's own tracked test source.
         self.commit("readme-note.txt", "Authorization: " + "ghp_" + "x"*40)
-        git(self.root, "checkout", "-q", "master")
+        git(self.root, "checkout", "-q", "main")
         findings, _ = audit.scan(self.root)
         self.assertTrue(any("credential-looking token" in v
                             for values in findings.values() for v in values), findings)
