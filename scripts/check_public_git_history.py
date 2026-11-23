@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_public_repo_safety import MAX_SCAN_BYTES, inspect, dangerous_path
 
 SHA_RE = re.compile(r"^[a-f0-9]{40,64}$")
