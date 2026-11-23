@@ -75,15 +75,16 @@ class HistoryAuditTests(unittest.TestCase):
                             for values in findings.values() for v in values))
 
     def test_inline_fixture_marker_is_not_a_private_key(self):
-        self.commit("fixture.py",
-                    'sample = "' + '-----BEGIN PRIVATE KEY-----' + '"')
+        marker = "-----BEGIN " + "PRIVATE KEY-----"
+        self.commit("fixture.py", 'sample = "' + marker + '"')
         findings, _ = audit.scan(self.root)
         self.assertFalse(any("private key PEM block" in issue
                              for values in findings.values() for issue in values))
 
     def test_full_multiline_pem_is_detected(self):
-        sample = ("-----BEGIN PRIVATE KEY-----\\n" + "a"*64 +
-                  "\\n-----END PRIVATE KEY-----")
+        header = "-----BEGIN " + "PRIVATE KEY-----"
+        footer = "-----END " + "PRIVATE KEY-----"
+        sample = header + chr(10) + "a"*64 + chr(10) + footer
         self.commit("temp-key.txt", sample)
         findings, _ = audit.scan(self.root)
         self.assertTrue(any("private key PEM block" in issue
