@@ -1,0 +1,25 @@
+name: Main ruleset audit
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/audit_main_ruleset.py"
+      - "tests/test_main_ruleset.py"
+      - ".github/workflows/main-ruleset-audit.yml"
+permissions:
+  contents: read
+jobs:
+  audit:
+    name: Main ruleset audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Ruleset negative tests
+        run: python -m unittest discover -s tests -p test_main_ruleset.py -v
+      - name: Query active main branch protections
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/audit_main_ruleset.py
