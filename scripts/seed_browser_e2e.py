@@ -43,6 +43,13 @@ def main():
             "INSERT INTO sme.asahi_samples(tenant_id,device_id,site_id,sampled_at,hostname,cpu_percent,memory_percent) "
             "VALUES (%s,%s,%s,%s,'aichi-telemetry',27,35),(%s,%s,%s,%s,'owari-telemetry',81,62)",
             (a,asset_a1,site_a,now,b,asset_b,site_b,now))
+        # Real database NULL telemetry on a separate authorized asset, not JS mock data.
+        # CI must render missing readings as N/A, never as 0%.
+        db.execute(
+            "INSERT INTO sme.asahi_samples(tenant_id,device_id,site_id,sampled_at,"
+            "hostname,cpu_percent,memory_percent) VALUES(%s,%s,%s,%s,"
+            "'aichi-missing-sensors',NULL,NULL)",
+            (a,asset_a2,site_a,now))
         for identity,tenant in ((u,a),(u,b),(other,a)):
             db.execute("INSERT INTO sme.role_assignments(tenant_id,id,identity_id,role,scope_type) VALUES (%s,%s,%s,'viewer','tenant')",
                        (tenant,uuid4(),identity))
