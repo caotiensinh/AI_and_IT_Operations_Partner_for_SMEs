@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - "scripts/audit_main_ruleset.py"
+      - "scripts/install_main_ruleset.py"
       - "tests/test_main_ruleset.py"
+      - "tests/test_install_main_ruleset.py"
       - ".github/workflows/main-ruleset-audit.yml"
 permissions:
   contents: read
@@ -19,6 +21,8 @@ jobs:
           python-version: '3.12'
       - name: Ruleset negative tests
         run: python -m unittest discover -s tests -p test_main_ruleset.py -v
+      - name: Installer safety/negative tests
+        run: python -m unittest discover -s tests -p test_install_main_ruleset.py -v
       - name: Query active main branch protections
         env:
           GITHUB_TOKEN: ${{ github.token }}
