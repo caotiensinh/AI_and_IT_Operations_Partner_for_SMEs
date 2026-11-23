@@ -23,3 +23,25 @@ jobs:
         run: python -m unittest discover -s tests -p test_public_repo_safety.py -v
       - name: Inspect the complete tracked checkout
         run: python scripts/check_public_repo_safety.py
+  reachable-history-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch all public repository branch and tag refs for history audit
+        run: |
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          git fetch origin '+refs/tags/*:refs/tags/*'
+          git show-ref --head | wc -l
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test historical secret detection against disposable Git repositories
+        run: python -m unittest discover -s tests -p test_public_git_history.py -v
+      - name: Audit all fetched reachable Git objects and historical filenames
+        run: python scripts/check_public_git_history.py
