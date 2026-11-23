@@ -110,8 +110,16 @@ try {
     await page.getByText('aichi-telemetry').waitFor({timeout:15000});
     assert.equal(await page.getByText('owari-telemetry').count(),0);
     const telemetryA=(await fetchExpected(context,'/v1/tenants/'+fixture.tenant_a+'/itops/asahi/latest')).devices;
-    assert.equal(telemetryA.length,1);
+    assert.equal(telemetryA.length,2,'fixture requires normal and NULL readings');
     await assertTelemetryTable(page,telemetryA);
+    const missing=telemetryA.find(m=>m.hostname==='aichi-missing-sensors');
+    assert.ok(missing,'NULL-sensor fixture missing from authorized API');
+    assert.equal(missing.cpu_percent,null);
+    assert.equal(missing.memory_percent,null);
+    await page.getByText('aichi-missing-sensors').waitFor({timeout:15000});
+    const missingRow=page.locator('main table tbody tr').filter({hasText:'aichi-missing-sensors'});
+    assert.equal(await missingRow.locator('td:nth-child(2)').innerText(),'N/A');
+    assert.equal(await missingRow.locator('td:nth-child(3)').innerText(),'N/A');
     await capture(page,'monitoring-'+width+'x'+height,width,height);
     if(width <= 760) assert.equal(await page.locator('.mobileNav').isVisible(),true);
     else assert.equal(await page.locator('.sidebar').isVisible(),true);
@@ -136,6 +144,54 @@ try {
     assert.equal(forbiddenMetrics.status(),403,'foreign telemetry must be denied');
     await context.close();
   }
+  // Failure/recovery tests run against real API and database, with only
+  // network fault injection. They do not add synthetic mock success data.
+  {
+    const {context,page}=await openWithToken(390,844,fixture.both_token);
+    const nav=page.locator('.mobileNav');
+    await page.getByText('Aichi NAS').waitFor({timeout:15000});
+    await nav.getByRole('button',{name:'Monitoring'}).click();
+    await page.getByText('aichi-telemetry').waitFor({timeout:15000});
+    const monitoringPath='**/v1/tenants/'+fixture.tenant_a+'/itops/asahi/latest';
+    await page.route(monitoringPath,route=>route.fulfill({
+      status:503,contentType:'application/json',body:'{"detail":"synthetic CI outage"}'
+    }));
+    await nav.getByRole('button',{name:'Overview'}).click();
+    await nav.getByRole('button',{name:'Monitoring'}).click();
+    await page.getByText('Monitoring unavailable:').waitFor({timeout:15000});
+    assert.equal(await page.getByText('aichi-telemetry').count(),0,
+                 'stale telemetry must disappear during outage');
+    assert.equal(await page.locator('main table tbody tr').count(),0);
+    await page.unroute(monitoringPath);
+    await nav.getByRole('button',{name:'Overview'}).click();
+    await nav.getByRole('button',{name:'Monitoring'}).click();
+    await page.getByText('aichi-telemetry').waitFor({timeout:15000});
+    const recovered=(await fetchExpected(context,'/v1/tenants/'+fixture.tenant_a+'/itops/asahi/latest')).devices;
+    await assertTelemetryTable(page,recovered);
+    await context.close();
+  }
+  {
+    const {context,page}=await openWithToken(1440,900,fixture.both_token);
+    await page.getByText('Aichi NAS').waitFor({timeout:15000});
+    const assetsPath='**/v1/tenants/'+fixture.tenant_b+'/assets';
+    await page.route(assetsPath,route=>route.fulfill({
+      status:503,contentType:'application/json',body:'{"detail":"synthetic CI outage"}'
+    }));
+    await page.locator('select[aria-label="Select company"]').selectOption(fixture.tenant_b);
+    await page.getByText('Unable to load workspace').waitFor({timeout:15000});
+    assert.equal(await page.getByText('Aichi NAS').count(),0,
+                 'previous tenant data must not persist during failed switch');
+    assert.equal(await page.getByText('Owari Camera').count(),0);
+    await page.unroute(assetsPath);
+    await page.locator('select[aria-label="Select company"]').selectOption(fixture.tenant_a);
+    await page.getByText('Aichi NAS').waitFor({timeout:15000});
+    await page.locator('select[aria-label="Select company"]').selectOption(fixture.tenant_b);
+    await page.getByText('Owari Camera').waitFor({timeout:15000});
+    const recovered=(await fetchExpected(context,'/v1/tenants/'+fixture.tenant_b+'/assets')).assets;
+    await assertAssetTable(page,recovered);
+    assert.equal(await page.getByText('Aichi NAS').count(),0);
+    await context.close();
+  }
   if(evidenceDir) {
     writeFileSync(join(evidenceDir,'manifest.json'),JSON.stringify({
       evidence_type:'INTEGRATION_TEST_NOT_USER_ACCEPTANCE',
@@ -152,7 +208,7 @@ try {
     },null,2));
     assert.equal(captures.length,13,'expected 12 screen/viewport captures plus unauthorized state');
   }
-  console.log('PASS: 4 viewports, per-cell UI/API equality for assets and telemetry, cross-tenant denials, 13 integrity-labelled screenshots.');
+  console.log('PASS: four viewports, UI/API field equality, genuine PostgreSQL NULL sensors shown N/A, isolated tenant outages/recovery, 13 screenshot integrity proofs.');
 } finally {
   await browser.close();
 }
