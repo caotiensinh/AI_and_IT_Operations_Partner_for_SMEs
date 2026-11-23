@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "id": "GOV-ENFORCEMENT",
+  "title": "Mandatory contribution and PR evidence policy",
+  "status": "IN_PROGRESS",
+  "level": "L0",
+  "scope": "Shared agent instructions, PR contract CI, admin ruleset checklist and non-bypass governance",
+  "environment": "repository",
+  "commit_sha": "",
+  "owner": "repository-maintainer",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "A PR includes implementation code",
+      "when": "It lacks acceptance IDs or matching record",
+      "then": "PR governance check fails",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-02",
+      "given": "A PR has a malformed or falsely ACCEPTED record",
+      "when": "PR governance runs",
+      "then": "CI fails closed",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-03",
+      "given": "An agent or human tries to directly push to main",
+      "when": "GitHub ruleset is active",
+      "then": "GitHub rejects direct writes and requires reviewed PR",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-04",
+      "given": "A PR has pending/failed checks or no independent approval",
+      "when": "A merge is attempted",
+      "then": "GitHub server-side enforcement blocks merge",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "gates": {
+    "contract": true,
+    "persist": false,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "blockers": [
+    "Repository ruleset not configured or not verifiable from current connector permissions",
+    "No independent reviewer acceptance of exact SHA/environment"
+  ]
+}
