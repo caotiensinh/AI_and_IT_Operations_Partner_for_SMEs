@@ -39,6 +39,11 @@ def validate_pr(body: str, records_root: Path, changed_files: list[str], validat
         raise ValueError("Invalid acceptance ID")
     if not changed_files:
         raise ValueError("PR has no changed files")
+    if any(not isinstance(p, str) or not p or p.startswith("/") or ".." in Path(p).parts for p in changed_files):
+        raise ValueError("Invalid changed-file path")
+    required = {f"acceptance/records/{i}.json" for i in identifiers}
+    if not required.issubset(set(changed_files)):
+        raise ValueError("Each Acceptance-ID must have a changed acceptance/records/<ID>.json in this PR")
     # Verification is structural; a local PR record cannot grant human approval.
     validate = validator or _validator()
     for identifier in identifiers:
@@ -49,9 +54,8 @@ def validate_pr(body: str, records_root: Path, changed_files: list[str], validat
         if data.get("id") != identifier:
             raise ValueError(f"Acceptance record ID mismatch: {identifier}")
         validate(data)
-    # All contributors, including docs-only, must provide a traceable acceptance record.
-    # An old record with no modified acceptance files may be referenced but never asserts
-    # the current PR passed L4; independent GitHub approval is still mandatory.
+    # All contributors, including docs-only, update a scoped acceptance record.
+    # A record cannot self-approve; GitHub independent review is still mandatory.
     return {"type": tags["Change-Type"], "ids": identifiers, "files": len(changed_files)}
 
 def main(argv=None):
