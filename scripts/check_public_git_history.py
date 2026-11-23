@@ -127,7 +127,7 @@ def scan(root: Path) -> tuple[dict[str, list[str]], dict[str, int]]:
             if kind != b"blob":
                 continue
             blobs += 1
-            if size > MAX_SCAN_BYTES:
+            if size > MAX_HISTORY_SCAN_BYTES:
                 # Conservative: cannot certify this blob with current detector.
                 findings["blob:" + oid] = ["blob exceeds 64 MiB audit limit"]
                 continue
