@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "REL-READINESS",
+  "title": "Fail-closed production readiness manifest contract integration",
+  "status": "IN_PROGRESS",
+  "level": "L0",
+  "scope": "Integrate the non-deploying release contract from legacy PR #69 into a current-main isolated branch",
+  "environment": "ci",
+  "commit_sha": "",
+  "owner": "repository-maintainer",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "Manifest contains eight production gates",
+      "when": "Schema CLI executes",
+      "then": "All eight remain false and manifest is valid",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-02",
+      "given": "Production requirements remain unmet",
+      "when": "--check-production is invoked",
+      "then": "Returns a nonzero exit status without deployment",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-03",
+      "given": "A PR reviewer inspects the exact integrated SHA",
+      "when": "Required CI and independent review pass",
+      "then": "Only contract integration may be approved; not a production release",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "gates": {
+    "contract": true,
+    "persist": false,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "blockers": [
+    "Independent review not completed",
+    "Required checks for exact integrated source not yet verified",
+    "Main branch ruleset not active; integration candidate must not authorize release"
+  ]
+}
