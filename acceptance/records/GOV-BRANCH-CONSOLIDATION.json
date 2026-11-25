@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "id": "GOV-BRANCH-CONSOLIDATION",
+  "title": "Consolidate unique safe changes from all repository branches into protected main",
+  "status": "IN_PROGRESS",
+  "level": "L0",
+  "scope": "Inventory, classify and integrate unique code while preserving main and security boundaries",
+  "environment": "repository",
+  "commit_sha": "",
+  "owner": "repository-maintainer",
+  "criteria": [
+    {
+      "id": "AC-01",
+      "given": "Repository has multiple active and historical branches",
+      "when": "Inventory runs against pinned main",
+      "then": "Every branch is classified and ancestry is recorded",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-02",
+      "given": "A branch has unique changes absent from main",
+      "when": "An integration candidate is constructed",
+      "then": "Unique changes are reconciled without loss or duplicate migrations and security boundaries remain fail-closed",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-03",
+      "given": "Integration branch CI and security review are complete",
+      "when": "A main merge is attempted",
+      "then": "Server-side ruleset requires successful checks and independent approval",
+      "verified": false,
+      "evidence": []
+    },
+    {
+      "id": "AC-04",
+      "given": "Every unique branch change is accepted or formally excluded",
+      "when": "Main is independently audited",
+      "then": "All decisions and traces are reproducible on exact main SHA",
+      "verified": false,
+      "evidence": []
+    }
+  ],
+  "gates": {
+    "contract": true,
+    "persist": false,
+    "functional": false,
+    "security": false,
+    "integration": false,
+    "operations": false,
+    "evidence": false,
+    "product": false
+  },
+  "review": {
+    "reviewer": "",
+    "decision": "",
+    "commit_sha": "",
+    "environment": "",
+    "evidence": []
+  },
+  "blockers": [
+    "39 diverged branches require integration review",
+    "Existing PR #67 explicitly DO NOT MERGE and has external staging/IdP blockers",
+    "GitHub main ruleset is not configured; API returned zero rulesets and branch-protection read denied",
+    "PR #75 screenshot archive blocked by Actions storage quota",
+    "Independent security/user signoff not available"
+  ]
+}
